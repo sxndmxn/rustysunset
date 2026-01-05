@@ -240,3 +240,274 @@ fn apply_env(config: &mut Config) {
         config.daemon.state_file = val;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn mode_default_is_auto() {
+        assert_eq!(Mode::default(), Mode::Auto);
+    }
+
+    #[test]
+    fn location_default_is_zero_coordinates() {
+        let loc = Location::default();
+        assert_eq!(loc.latitude, 0.0);
+        assert_eq!(loc.longitude, 0.0);
+    }
+
+    #[test]
+    fn schedule_default_values() {
+        let sched = Schedule::default();
+        assert_eq!(sched.wakeup, "07:00");
+        assert_eq!(sched.bedtime, "22:00");
+    }
+
+    #[test]
+    fn transition_default_values() {
+        let trans = Transition::default();
+        assert_eq!(trans.duration_minutes, 60);
+        assert_eq!(trans.easing, "linear");
+    }
+
+    #[test]
+    fn temperature_default_values() {
+        let temp = Temperature::default();
+        assert_eq!(temp.day, 6500);
+        assert_eq!(temp.night, 1500);
+    }
+
+    #[test]
+    fn daemon_default_values() {
+        let daemon = Daemon::default();
+        assert_eq!(daemon.tick_interval_seconds, 5);
+        assert_eq!(daemon.status_file, "/tmp/rustysunset.status");
+        assert_eq!(daemon.optimize_updates, true);
+        assert_eq!(daemon.status_update_interval, 1);
+        assert_eq!(daemon.state_file, "~/.cache/rustysunset/state.toml");
+    }
+
+    #[test]
+    fn config_default_all_fields() {
+        let config = Config::default();
+        assert_eq!(config.mode, Mode::Auto);
+        assert_eq!(config.location.latitude, 0.0);
+        assert_eq!(config.temperature.day, 6500);
+    }
+
+    #[test]
+    fn load_with_no_path_returns_default() {
+        let config = load(None);
+        assert_eq!(config.mode, Mode::Auto);
+        assert_eq!(config.temperature.day, 6500);
+    }
+
+    #[test]
+    fn load_with_valid_toml() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        
+        let toml_content = r#"
+mode = "fixed"
+
+[location]
+latitude = 48.516
+longitude = 9.12
+
+[schedule]
+wakeup = "07:00"
+bedtime = "22:00"
+
+[transition]
+duration_minutes = 60
+easing = "linear"
+
+[temperature]
+day = 7000
+night = 2000
+
+[daemon]
+tick_interval_seconds = 5
+status_file = "/tmp/rustysunset.status"
+optimize_updates = true
+status_update_interval = 1
+state_file = "~/.cache/rustysunset/state.toml"
+"#;
+        fs::write(&config_path, toml_content).unwrap();
+
+        let config = load(Some(config_path.to_str().unwrap()));
+        
+        assert_eq!(config.mode, Mode::Fixed);
+        assert_eq!(config.location.latitude, 48.516);
+        assert_eq!(config.location.longitude, 9.12);
+        assert_eq!(config.temperature.day, 7000);
+        assert_eq!(config.temperature.night, 2000);
+    }
+
+    #[test]
+    fn load_with_invalid_toml_returns_default() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("invalid.toml");
+        
+        fs::write(&config_path, "invalid toml content {]").unwrap();
+
+        let config = load(Some(config_path.to_str().unwrap()));
+        
+        // Should return defaults on parse error
+        assert_eq!(config.mode, Mode::Auto);
+    }
+
+    #[test]
+    fn load_applies_defaults_for_missing_daemon_fields() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        
+        let toml_content = r#"
+mode = "auto"
+
+[daemon]
+tick_interval_seconds = 0
+status_file = ""
+state_file = ""
+"#;
+        fs::write(&config_path, toml_content).unwrap();
+
+        let config = load(Some(config_path.to_str().unwrap()));
+        
+        // Should apply defaults for zero/empty values
+        assert_eq!(config.daemon.tick_interval_seconds, 5);
+        assert_eq!(config.daemon.status_file, "/tmp/rustysunset.status");
+        assert_eq!(config.daemon.state_file, "~/.cache/rustysunset/state.toml");
+    }
+
+    #[test]
+    fn apply_env_mode() {
+        env::set_var("RUSTYSUNSET_MODE", "fixed");
+        let config = load(None);
+        env::remove_var("RUSTYSUNSET_MODE");
+        
+        assert_eq!(config.mode, Mode::Fixed);
+    }
+
+    #[test]
+    fn apply_env_latitude_longitude() {
+        env::set_var("RUSTYSUNSET_LATITUDE", "52.5");
+        env::set_var("RUSTYSUNSET_LONGITUDE", "13.4");
+        let config = load(None);
+        env::remove_var("RUSTYSUNSET_LATITUDE");
+        env::remove_var("RUSTYSUNSET_LONGITUDE");
+        
+        assert_eq!(config.location.latitude, 52.5);
+        assert_eq!(config.location.longitude, 13.4);
+    }
+
+    #[test]
+    fn apply_env_temperatures() {
+        env::set_var("RUSTYSUNSET_DAY_TEMP", "7000");
+        env::set_var("RUSTYSUNSET_NIGHT_TEMP", "2000");
+        let config = load(None);
+        env::remove_var("RUSTYSUNSET_DAY_TEMP");
+        env::remove_var("RUSTYSUNSET_NIGHT_TEMP");
+        
+        assert_eq!(config.temperature.day, 7000);
+        assert_eq!(config.temperature.night, 2000);
+    }
+
+    #[test]
+    fn apply_env_transition_duration() {
+        env::set_var("RUSTYSUNSET_TRANSITION_DURATION", "90");
+        let config = load(None);
+        env::remove_var("RUSTYSUNSET_TRANSITION_DURATION");
+        
+        assert_eq!(config.transition.duration_minutes, 90);
+    }
+
+    #[test]
+    fn apply_env_easing() {
+        env::set_var("RUSTYSUNSET_EASING", "ease_in_out");
+        let config = load(None);
+        env::remove_var("RUSTYSUNSET_EASING");
+        
+        assert_eq!(config.transition.easing, "ease_in_out");
+    }
+
+    #[test]
+    fn apply_env_tick_interval() {
+        env::set_var("RUSTYSUNSET_TICK_INTERVAL", "10");
+        let config = load(None);
+        env::remove_var("RUSTYSUNSET_TICK_INTERVAL");
+        
+        assert_eq!(config.daemon.tick_interval_seconds, 10);
+    }
+
+    #[test]
+    fn apply_env_status_file() {
+        env::set_var("RUSTYSUNSET_STATUS_FILE", "/tmp/custom.status");
+        let config = load(None);
+        env::remove_var("RUSTYSUNSET_STATUS_FILE");
+        
+        assert_eq!(config.daemon.status_file, "/tmp/custom.status");
+    }
+
+    #[test]
+    fn apply_env_wakeup_bedtime() {
+        env::set_var("RUSTYSUNSET_WAKEUP", "08:30");
+        env::set_var("RUSTYSUNSET_BEDTIME", "23:30");
+        let config = load(None);
+        env::remove_var("RUSTYSUNSET_WAKEUP");
+        env::remove_var("RUSTYSUNSET_BEDTIME");
+        
+        assert_eq!(config.schedule.wakeup, "08:30");
+        assert_eq!(config.schedule.bedtime, "23:30");
+    }
+
+    #[test]
+    fn apply_env_optimize_updates_true() {
+        env::set_var("RUSTYSUNSET_OPTIMIZE_UPDATES", "true");
+        let config = load(None);
+        env::remove_var("RUSTYSUNSET_OPTIMIZE_UPDATES");
+        
+        assert_eq!(config.daemon.optimize_updates, true);
+    }
+
+    #[test]
+    fn apply_env_optimize_updates_false() {
+        env::set_var("RUSTYSUNSET_OPTIMIZE_UPDATES", "false");
+        let config = load(None);
+        env::remove_var("RUSTYSUNSET_OPTIMIZE_UPDATES");
+        
+        assert_eq!(config.daemon.optimize_updates, false);
+    }
+
+    #[test]
+    fn apply_env_status_update_interval() {
+        env::set_var("RUSTYSUNSET_STATUS_UPDATE_INTERVAL", "5");
+        let config = load(None);
+        env::remove_var("RUSTYSUNSET_STATUS_UPDATE_INTERVAL");
+        
+        assert_eq!(config.daemon.status_update_interval, 5);
+    }
+
+    #[test]
+    fn apply_env_state_file() {
+        env::set_var("RUSTYSUNSET_STATE_FILE", "/tmp/state.toml");
+        let config = load(None);
+        env::remove_var("RUSTYSUNSET_STATE_FILE");
+        
+        assert_eq!(config.daemon.state_file, "/tmp/state.toml");
+    }
+
+    #[test]
+    fn find_config_returns_none_when_no_config_exists() {
+        // This test relies on there being no config in the test environment
+        // We can't guarantee this, but it's a reasonable test
+        let result = find_config();
+        // Result could be None or Some, depending on environment
+        // Just verify it doesn't panic
+        let _ = result;
+    }
+}

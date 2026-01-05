@@ -363,7 +363,9 @@ fn run_daemon(
 
 #[cfg(test)]
 mod tests {
-    use super::should_set_temperature;
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn optimize_skips_same_temperature() {
@@ -378,5 +380,97 @@ mod tests {
     #[test]
     fn always_sets_when_optimization_disabled() {
         assert!(should_set_temperature(false, Some(2000), 2000));
+    }
+
+    #[test]
+    fn should_set_temperature_first_time() {
+        assert!(should_set_temperature(true, None, 2000));
+    }
+
+    #[test]
+    fn read_status_file_parses_valid_content() {
+        let temp_dir = TempDir::new().unwrap();
+        let status_path = temp_dir.path().join("status");
+        
+        fs::write(&status_path, "temp=5432\nphase=night\ntarget=1500\nprogress=0.75\n").unwrap();
+        
+        let (temp, phase, target, progress) = read_status_file(status_path.to_str().unwrap());
+        
+        assert_eq!(temp, 5432);
+        assert_eq!(phase, "night");
+        assert_eq!(target, 1500);
+        assert_eq!(progress, 0.75);
+    }
+
+    #[test]
+    fn read_status_file_handles_missing_file() {
+        let (temp, phase, target, progress) = read_status_file("/nonexistent/file");
+        
+        assert_eq!(temp, 0);
+        assert_eq!(phase, "unknown");
+        assert_eq!(target, 0);
+        assert_eq!(progress, 0.0);
+    }
+
+    #[test]
+    fn read_status_file_handles_partial_content() {
+        let temp_dir = TempDir::new().unwrap();
+        let status_path = temp_dir.path().join("status");
+        
+        fs::write(&status_path, "temp=3000\nphase=day\n").unwrap();
+        
+        let (temp, phase, target, progress) = read_status_file(status_path.to_str().unwrap());
+        
+        assert_eq!(temp, 3000);
+        assert_eq!(phase, "day");
+        assert_eq!(target, 0);
+        assert_eq!(progress, 0.0);
+    }
+
+    #[test]
+    fn read_status_file_handles_invalid_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let status_path = temp_dir.path().join("status");
+        
+        fs::write(&status_path, "temp=invalid\nphase=test\ntarget=bad\nprogress=wrong\n").unwrap();
+        
+        let (temp, phase, target, progress) = read_status_file(status_path.to_str().unwrap());
+        
+        assert_eq!(temp, 0);
+        assert_eq!(phase, "test");
+        assert_eq!(target, 0);
+        assert_eq!(progress, 0.0);
+    }
+
+    #[test]
+    fn expand_path_with_tilde() {
+        let result = expand_path("~/test/path");
+        assert!(result.is_some());
+        let path = result.unwrap();
+        assert!(!path.to_string_lossy().contains("~"));
+    }
+
+    #[test]
+    fn expand_path_without_tilde() {
+        let result = expand_path("/absolute/path");
+        assert_eq!(result, Some(std::path::PathBuf::from("/absolute/path")));
+    }
+
+    #[test]
+    fn expand_path_relative() {
+        let result = expand_path("relative/path");
+        assert_eq!(result, Some(std::path::PathBuf::from("relative/path")));
+    }
+
+    #[test]
+    fn control_file_from_status_changes_extension() {
+        let result = control_file_from_status("/tmp/rustysunset.status");
+        assert_eq!(result, std::path::PathBuf::from("/tmp/rustysunset.control"));
+    }
+
+    #[test]
+    fn control_file_from_status_no_extension() {
+        let result = control_file_from_status("/tmp/rustysunset");
+        assert_eq!(result, std::path::PathBuf::from("/tmp/rustysunset.control"));
     }
 }

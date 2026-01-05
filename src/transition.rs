@@ -224,4 +224,60 @@ mod tests {
 
         assert_eq!(transition.current_temperature(), 4000);
     }
+
+    #[test]
+    fn update_with_zero_duration_sets_immediately() {
+        let mut config = Config::default();
+        config.transition.duration_minutes = 0;
+        let mut transition = Transition::new_with_temp(config, 6500);
+
+        transition.update(1500);
+
+        assert_eq!(transition.current_temperature(), 1500);
+        assert_eq!(transition.target_temperature(), 1500);
+        assert!(!transition.in_transition);
+    }
+
+    #[test]
+    fn update_restarts_transition_on_target_change() {
+        let config = Config::default();
+        let mut transition = Transition::new_with_temp(config, 6500);
+
+        transition.update(1500);
+        
+        transition.update(3000);
+        
+        // Should have restarted transition with new target
+        assert_eq!(transition.target_temperature(), 3000);
+        // Start temp should be the current temp when target changed
+        assert!(transition.in_transition);
+    }
+
+    #[test]
+    fn progress_returns_one_when_not_in_transition() {
+        let config = Config::default();
+        let transition = Transition::new_with_temp(config, 6500);
+
+        assert_eq!(transition.progress(), 1.0);
+    }
+
+    #[test]
+    fn progress_returns_one_when_duration_is_zero() {
+        let mut config = Config::default();
+        config.transition.duration_minutes = 0;
+        let transition = Transition::new_with_temp(config, 6500);
+
+        assert_eq!(transition.progress(), 1.0);
+    }
+
+    #[test]
+    fn new_with_temp_initializes_correctly() {
+        let config = Config::default();
+        let transition = Transition::new_with_temp(config, 5000);
+
+        assert_eq!(transition.current_temperature(), 5000);
+        assert_eq!(transition.target_temperature(), 5000);
+        assert_eq!(transition.transition_start_temp(), 5000);
+        assert!(!transition.in_transition);
+    }
 }
