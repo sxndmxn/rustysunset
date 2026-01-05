@@ -142,7 +142,7 @@ fn main() {
         }
         Some(Commands::Pause) => {
             // Write pause command to control file
-            let control_file = config.daemon.status_file.replace("status", "control");
+            let control_file = control_file_from_status(&config.daemon.status_file);
             let _ = fs::write(&control_file, "pause\n");
             if !args.quiet {
                 println!("Paused");
@@ -150,7 +150,7 @@ fn main() {
         }
         Some(Commands::Resume) => {
             // Write resume command to control file
-            let control_file = config.daemon.status_file.replace("status", "control");
+            let control_file = control_file_from_status(&config.daemon.status_file);
             let _ = fs::write(&control_file, "resume\n");
             if !args.quiet {
                 println!("Resumed");
@@ -172,6 +172,10 @@ fn expand_path(path: &str) -> Option<std::path::PathBuf> {
     } else {
         Some(std::path::PathBuf::from(path))
     }
+}
+
+fn control_file_from_status(status_file: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(status_file).with_extension("control")
 }
 
 fn should_set_temperature(optimize_updates: bool, last_sent: Option<u16>, current: u16) -> bool {
@@ -200,17 +204,18 @@ fn run_daemon(
         log::info!("Mode: {:?}", config.mode);
     }
 
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_clone = shutdown.clone();
     let paused = Arc::new(AtomicBool::new(false));
-    let paused_clone = paused.clone();
 
     // Set up signal handler for graceful shutdown
     let result = ctrlc::set_handler(move || {
-        paused_clone.store(true, Ordering::SeqCst);
+        shutdown_clone.store(true, Ordering::SeqCst);
     });
 
     // Check for control file commands
-    let control_file = config.daemon.status_file.replace("status", "control");
-    let status_file = config.daemon.status_file.clone();
+    let control_file = control_file_from_status(&config.daemon.status_file);
+    let status_file = std::path::PathBuf::from(&config.daemon.status_file);
     let state_file = config.daemon.state_file.clone();
 
     let scheduler = scheduler::Schedule::new(config.clone())
@@ -259,34 +264,7 @@ fn run_daemon(
 
     let mut last_set_temperature: Option<u16> = None;
 
-    // Track transition start for state saving
-    let transition_start_timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
     loop {
-        // Handle signal if received
-        if paused.load(Ordering::SeqCst) {
-            // Save state before exiting
-            if !dry_run {
-                let elapsed = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()
-                    .saturating_sub(transition_start_timestamp);
-
-                let state = state::State {
-                    transition_start_temp: transition.transition_start_temp(),
-                    transition_start_timestamp,
-                    elapsed_seconds: elapsed as u64,
-                    target_temp: transition.target_temperature(),
-                };
-                let _ = state.save(&state_file);
-            }
-            break;
-        }
-
         // Check control file for commands
         if let Ok(content) = fs::read_to_string(&control_file) {
             for line in content.lines() {
@@ -302,6 +280,27 @@ fn run_daemon(
             }
             // Clear control file after reading
             let _ = fs::write(&control_file, "");
+        }
+
+        if shutdown.load(Ordering::SeqCst) {
+            // Save state before exiting
+            if !dry_run {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let start = transition.transition_start_timestamp();
+                let elapsed = now.saturating_sub(start);
+
+                let state = state::State {
+                    transition_start_temp: transition.transition_start_temp(),
+                    transition_start_timestamp: start,
+                    elapsed_seconds: elapsed as u64,
+                    target_temp: transition.target_temperature(),
+                };
+                let _ = state.save(&state_file);
+            }
+            break;
         }
 
         if paused.load(Ordering::SeqCst) {

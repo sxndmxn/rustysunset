@@ -5,6 +5,7 @@ pub struct Transition {
     current_temperature: u16,
     target_temperature: u16,
     transition_start_temp: u16,
+    transition_start_timestamp: u64,
     phase_start_time: std::time::Instant,
     in_transition: bool,
 }
@@ -16,6 +17,7 @@ impl Transition {
             current_temperature: initial_temp,
             target_temperature: initial_temp,
             transition_start_temp: initial_temp,
+            transition_start_timestamp: current_unix_timestamp(),
             phase_start_time: std::time::Instant::now(),
             in_transition: false,
         }
@@ -29,6 +31,7 @@ impl Transition {
             self.current_temperature = target_temp;
             self.target_temperature = target_temp;
             self.transition_start_temp = target_temp;
+            self.transition_start_timestamp = current_unix_timestamp();
             self.in_transition = false;
             return;
         }
@@ -44,6 +47,7 @@ impl Transition {
             self.transition_start_temp = self.current_temperature;
             self.target_temperature = target_temp;
             self.phase_start_time = std::time::Instant::now();
+            self.transition_start_timestamp = current_unix_timestamp();
             self.in_transition = true;
         }
 
@@ -110,6 +114,17 @@ impl Transition {
     pub fn transition_start_temp(&self) -> u16 {
         self.transition_start_temp
     }
+
+    pub fn transition_start_timestamp(&self) -> u64 {
+        self.transition_start_timestamp
+    }
+}
+
+fn current_unix_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]

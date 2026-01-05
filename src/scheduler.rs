@@ -25,17 +25,26 @@ pub struct Schedule {
     config: Config,
     wakeup_time: NaiveTime,
     bedtime_time: NaiveTime,
+    coordinates: Coordinates,
 }
 
 impl Schedule {
     pub fn new(config: Config) -> Result<Self, String> {
         let wakeup_time = parse_time("wakeup", &config.schedule.wakeup)?;
         let bedtime_time = parse_time("bedtime", &config.schedule.bedtime)?;
+        let coordinates = Coordinates::new(config.location.latitude, config.location.longitude)
+            .ok_or_else(|| {
+                format!(
+                    "Invalid coordinates: latitude={} longitude={}",
+                    config.location.latitude, config.location.longitude
+                )
+            })?;
 
         Ok(Self {
             config,
             wakeup_time,
             bedtime_time,
+            coordinates,
         })
     }
 
@@ -51,7 +60,7 @@ impl Schedule {
     }
 
     fn auto_phase(&self, now: DateTime<Local>) -> Phase {
-        let (sunrise, sunset) = sunrise_sunset_local(&self.config, now);
+        let (sunrise, sunset) = sunrise_sunset_local(&self.coordinates, now);
 
         let transition_duration = Duration::minutes(self.config.transition.duration_minutes as i64);
         let next_sunrise = sunrise + Duration::days(1);
@@ -105,13 +114,8 @@ fn parse_time(label: &str, value: &str) -> Result<NaiveTime, String> {
         .map_err(|e| format!("Invalid {} time '{}': {}", label, value, e))
 }
 
-fn sunrise_sunset_local(
-    config: &Config,
-    now: DateTime<Local>,
-) -> (DateTime<Local>, DateTime<Local>) {
-    let coord = Coordinates::new(config.location.latitude, config.location.longitude)
-        .expect("invalid coordinates");
-    let solar_day = SolarDay::new(coord, now.date_naive());
+fn sunrise_sunset_local(coordinates: &Coordinates, now: DateTime<Local>) -> (DateTime<Local>, DateTime<Local>) {
+    let solar_day = SolarDay::new(*coordinates, now.date_naive());
 
     let sunrise = solar_day
         .event_time(SolarEvent::Sunrise)
@@ -134,7 +138,7 @@ mod tests {
         let schedule = Schedule::new(config.clone()).expect("valid config");
 
         let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
-        let (_, sunset) = sunrise_sunset_local(&config, base);
+        let (_, sunset) = sunrise_sunset_local(&schedule.coordinates, base);
         let after_sunset = sunset + Duration::hours(2);
 
         assert_eq!(schedule.current_phase_at(after_sunset), Phase::Night);
@@ -147,7 +151,7 @@ mod tests {
         let schedule = Schedule::new(config.clone()).expect("valid config");
 
         let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
-        let (sunrise, _) = sunrise_sunset_local(&config, base);
+        let (sunrise, _) = sunrise_sunset_local(&schedule.coordinates, base);
         let next_sunrise = sunrise + Duration::days(1);
         let half_transition = Duration::minutes((config.transition.duration_minutes / 2) as i64);
         let before_next_sunrise = next_sunrise - half_transition;
@@ -164,7 +168,7 @@ mod tests {
         let schedule = Schedule::new(config.clone()).expect("valid config");
 
         let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
-        let (sunrise, sunset) = sunrise_sunset_local(&config, base);
+        let (sunrise, sunset) = sunrise_sunset_local(&schedule.coordinates, base);
         let midpoint = sunrise + (sunset - sunrise) / 2;
 
         assert_eq!(schedule.current_phase_at(midpoint), Phase::Day);
@@ -187,7 +191,7 @@ mod tests {
         let schedule = Schedule::new(config.clone()).expect("valid config");
 
         let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
-        let (_, sunset) = sunrise_sunset_local(&config, base);
+        let (_, sunset) = sunrise_sunset_local(&schedule.coordinates, base);
         let start = sunset - Duration::minutes(config.transition.duration_minutes as i64);
 
         assert_eq!(
@@ -202,7 +206,7 @@ mod tests {
         let schedule = Schedule::new(config.clone()).expect("valid config");
 
         let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
-        let (_, sunset) = sunrise_sunset_local(&config, base);
+        let (_, sunset) = sunrise_sunset_local(&schedule.coordinates, base);
 
         assert_eq!(schedule.current_phase_at(sunset), Phase::Night);
     }
@@ -213,7 +217,7 @@ mod tests {
         let schedule = Schedule::new(config.clone()).expect("valid config");
 
         let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
-        let (sunrise, _) = sunrise_sunset_local(&config, base);
+        let (sunrise, _) = sunrise_sunset_local(&schedule.coordinates, base);
 
         assert_eq!(
             schedule.current_phase_at(sunrise),
