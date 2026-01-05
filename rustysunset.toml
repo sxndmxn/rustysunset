@@ -29,5 +29,7 @@ night = 1500
 tick_interval_seconds = 5
 # Only call hyprctl when temperature changes (UNIX: do less work)
 optimize_updates = true
-# How often to update status file (0 = every tick, 5 = every 5 seconds)
-status_update_interval = 0
+# How often to update status file (0 = every tick, N = every N ticks)
+status_update_interval = 1
+# State file for transition persistence (follows XDG cache spec)
+state_file = "~/.cache/rustysunset/state.toml"

@@ -9,6 +9,7 @@ use std::time::Duration;
 mod config;
 mod hyprctl;
 mod scheduler;
+mod state;
 mod transition;
 
 #[derive(Parser, Debug)]
@@ -126,6 +127,11 @@ fn main() {
                     eprintln!("Failed to set temperature: {e}");
                     process::exit(1);
                 }
+                // Clear state file - this is an immediate override, not a transition
+                let state_file = expand_path(&config.daemon.state_file);
+                if let Some(ref p) = state_file {
+                    let _ = fs::remove_file(p);
+                }
                 // Also update status file
                 let status = format!(
                     "temp={}\nphase=manual\ntarget={}\nprogress=1.00\n",
@@ -160,6 +166,25 @@ fn main() {
     }
 }
 
+fn expand_path(path: &str) -> Option<std::path::PathBuf> {
+    if path.starts_with("~") {
+        dirs::home_dir().map(|home| home.join(&path[2..]))
+    } else {
+        Some(std::path::PathBuf::from(path))
+    }
+}
+
+fn should_set_temperature(optimize_updates: bool, last_sent: Option<u16>, current: u16) -> bool {
+    if !optimize_updates {
+        return true;
+    }
+
+    match last_sent {
+        Some(prev) => prev != current,
+        None => true,
+    }
+}
+
 fn run_daemon(
     config: config::Config,
     dry_run: bool,
@@ -178,16 +203,50 @@ fn run_daemon(
     let paused = Arc::new(AtomicBool::new(false));
     let paused_clone = paused.clone();
 
-    ctrlc::set_handler(move || {
+    // Set up signal handler for graceful shutdown
+    let result = ctrlc::set_handler(move || {
         paused_clone.store(true, Ordering::SeqCst);
-    })?;
+    });
 
     // Check for control file commands
     let control_file = config.daemon.status_file.replace("status", "control");
     let status_file = config.daemon.status_file.clone();
+    let state_file = config.daemon.state_file.clone();
 
-    let scheduler = scheduler::Schedule::new(config.clone());
-    let mut transition = transition::Transition::new(config.clone());
+    let scheduler = scheduler::Schedule::new(config.clone())
+        .map_err(|e| format!("Invalid schedule configuration: {e}"))?;
+
+    // Try to load state or calculate appropriate temperature
+    let initial_temp = if config.mode == config::Mode::Auto || config.mode == config::Mode::Fixed {
+        let target_temp = scheduler.target_temperature();
+
+        // Check for saved state
+        if let Some(saved_state) = state::State::load(&state_file) {
+            let max_age = config.transition.duration_minutes as u64 * 60 * 2;
+            if saved_state.age_seconds() < max_age {
+                // Resume from saved state
+                log::info!("Resuming transition from saved state");
+                let temp = state::calculate_temperature_from_state(
+                    &saved_state,
+                    config.transition.duration_minutes as u64 * 60,
+                    &config.transition.easing,
+                );
+                temp
+            } else {
+                // State too old, use calculated target
+                log::info!("Saved state too old, calculating fresh");
+                target_temp
+            }
+        } else {
+            // No state, use calculated target
+            target_temp
+        }
+    } else {
+        config.temperature.day
+    };
+
+    let mut transition = transition::Transition::new_with_temp(config.clone(), initial_temp);
+
     let tick_interval = Duration::from_secs(config.daemon.tick_interval_seconds);
 
     // For tracking when to update status file
@@ -198,7 +257,36 @@ fn run_daemon(
         config.daemon.status_update_interval
     };
 
+    let mut last_set_temperature: Option<u16> = None;
+
+    // Track transition start for state saving
+    let transition_start_timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
     loop {
+        // Handle signal if received
+        if paused.load(Ordering::SeqCst) {
+            // Save state before exiting
+            if !dry_run {
+                let elapsed = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    .saturating_sub(transition_start_timestamp);
+
+                let state = state::State {
+                    transition_start_temp: transition.transition_start_temp(),
+                    transition_start_timestamp,
+                    elapsed_seconds: elapsed as u64,
+                    target_temp: transition.target_temperature(),
+                };
+                let _ = state.save(&state_file);
+            }
+            break;
+        }
+
         // Check control file for commands
         if let Ok(content) = fs::read_to_string(&control_file) {
             for line in content.lines() {
@@ -230,7 +318,7 @@ fn run_daemon(
         let progress = transition.progress();
 
         if !quiet {
-            log::debug!(
+            log::info!(
                 "Phase: {:?}, Temp: {}, Target: {}, Progress: {:.2}",
                 phase,
                 temp,
@@ -239,12 +327,14 @@ fn run_daemon(
             );
         }
 
-        // Only call hyprctl if temperature changed (optimization)
         if !dry_run {
-            if let Err(e) = hyprctl::set_temperature(temp) {
-                eprintln!("Error setting temperature: {}", e);
-            } else {
-                log::debug!("Set temperature to {}", temp);
+            if should_set_temperature(config.daemon.optimize_updates, last_set_temperature, temp) {
+                if let Err(e) = hyprctl::set_temperature(temp) {
+                    eprintln!("Error setting temperature: {}", e);
+                } else {
+                    last_set_temperature = Some(temp);
+                    log::info!("Set temperature to {}", temp);
+                }
             }
 
             // Only update status file at configured interval
@@ -263,5 +353,31 @@ fn run_daemon(
         }
 
         thread::sleep(tick_interval);
+    }
+
+    if let Err(e) = result {
+        eprintln!("Error setting signal handler: {}", e);
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_set_temperature;
+
+    #[test]
+    fn optimize_skips_same_temperature() {
+        assert!(!should_set_temperature(true, Some(2000), 2000));
+    }
+
+    #[test]
+    fn optimize_sets_when_temperature_changes() {
+        assert!(should_set_temperature(true, Some(2000), 2100));
+    }
+
+    #[test]
+    fn always_sets_when_optimization_disabled() {
+        assert!(should_set_temperature(false, Some(2000), 2000));
     }
 }

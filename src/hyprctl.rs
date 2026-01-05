@@ -13,19 +13,6 @@ pub fn set_temperature(kelvin: u16) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn disable() -> Result<(), Box<dyn std::error::Error>> {
-    let output = Command::new("hyprctl")
-        .args(&["hyprsunset", "identity"])
-        .output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("hyprctl failed: {}", stderr).into());
-    }
-
-    Ok(())
-}
-
 pub fn is_hyprsunset_running() -> bool {
     Command::new("pidof")
         .arg("hyprsunset")

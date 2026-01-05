@@ -77,18 +77,11 @@ impl Default for Temperature {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Daemon {
-    #[serde(default)]
     pub tick_interval_seconds: u64,
-    #[serde(default)]
     pub status_file: String,
-    #[serde(default)]
     pub optimize_updates: bool,
-    #[serde(default = "default_status_update_interval")]
     pub status_update_interval: u64,
-}
-
-fn default_status_update_interval() -> u64 {
-    1
+    pub state_file: String,
 }
 
 impl Default for Daemon {
@@ -98,6 +91,7 @@ impl Default for Daemon {
             status_file: "/tmp/rustysunset.status".to_string(),
             optimize_updates: true,
             status_update_interval: 1,
+            state_file: "~/.cache/rustysunset/state.toml".to_string(),
         }
     }
 }
@@ -155,6 +149,17 @@ pub fn load(path: Option<&str>) -> Config {
         }
         None => Config::default(),
     };
+
+    // Apply defaults for any missing or empty daemon fields
+    if config.daemon.tick_interval_seconds == 0 {
+        config.daemon.tick_interval_seconds = 5;
+    }
+    if config.daemon.status_file.is_empty() {
+        config.daemon.status_file = "/tmp/rustysunset.status".to_string();
+    }
+    if config.daemon.state_file.is_empty() {
+        config.daemon.state_file = "~/.cache/rustysunset/state.toml".to_string();
+    }
 
     apply_env(&mut config);
     config
@@ -229,5 +234,9 @@ fn apply_env(config: &mut Config) {
         if let Ok(interval) = val.parse() {
             config.daemon.status_update_interval = interval;
         }
+    }
+
+    if let Ok(val) = std::env::var("RUSTYSUNSET_STATE_FILE") {
+        config.daemon.state_file = val;
     }
 }

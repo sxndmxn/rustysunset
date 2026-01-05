@@ -1,12 +1,5 @@
 use crate::config::Config;
 
-pub enum Easing {
-    Linear,
-    EaseIn,
-    EaseOut,
-    EaseInOut,
-}
-
 pub struct Transition {
     config: Config,
     current_temperature: u16,
@@ -17,42 +10,58 @@ pub struct Transition {
 }
 
 impl Transition {
-    pub fn new(config: Config) -> Self {
-        let current_temp = config.temperature.day;
+    pub fn new_with_temp(config: Config, initial_temp: u16) -> Self {
         Self {
             config,
-            current_temperature: current_temp,
-            target_temperature: current_temp,
-            transition_start_temp: current_temp,
+            current_temperature: initial_temp,
+            target_temperature: initial_temp,
+            transition_start_temp: initial_temp,
             phase_start_time: std::time::Instant::now(),
             in_transition: false,
         }
     }
 
     pub fn update(&mut self, target_temp: u16) {
-        let elapsed = self.phase_start_time.elapsed();
         let duration =
             std::time::Duration::from_secs(60 * self.config.transition.duration_minutes as u64);
 
-        if !self.in_transition {
+        if duration.is_zero() {
+            self.current_temperature = target_temp;
+            self.target_temperature = target_temp;
+            self.transition_start_temp = target_temp;
+            self.in_transition = false;
+            return;
+        }
+
+        if self.current_temperature == target_temp {
+            self.target_temperature = target_temp;
+            self.transition_start_temp = target_temp;
+            self.in_transition = false;
+            return;
+        }
+
+        if !self.in_transition || self.target_temperature != target_temp {
             self.transition_start_temp = self.current_temperature;
             self.target_temperature = target_temp;
             self.phase_start_time = std::time::Instant::now();
             self.in_transition = true;
         }
 
-        if elapsed < duration {
-            let progress = elapsed.as_secs_f64() / duration.as_secs_f64();
-            let eased_progress = self.apply_easing(progress);
+        let elapsed = self.phase_start_time.elapsed();
 
-            let temp_range = self.target_temperature as i16 - self.transition_start_temp as i16;
-            let temp_delta = (temp_range as f64 * eased_progress) as i16;
-
-            self.current_temperature = (self.transition_start_temp as i16 + temp_delta) as u16;
-        } else {
+        if elapsed >= duration {
             self.current_temperature = self.target_temperature;
             self.in_transition = false;
+            return;
         }
+
+        let progress = elapsed.as_secs_f64() / duration.as_secs_f64();
+        let eased_progress = self.apply_easing(progress);
+
+        let temp_range = self.target_temperature as i16 - self.transition_start_temp as i16;
+        let temp_delta = (temp_range as f64 * eased_progress) as i16;
+
+        self.current_temperature = (self.transition_start_temp as i16 + temp_delta) as u16;
     }
 
     fn apply_easing(&self, t: f64) -> f64 {
@@ -79,6 +88,10 @@ impl Transition {
         let duration =
             std::time::Duration::from_secs(60 * self.config.transition.duration_minutes as u64);
 
+        if duration.is_zero() {
+            return 1.0;
+        }
+
         if elapsed >= duration {
             1.0
         } else {
@@ -94,11 +107,106 @@ impl Transition {
         self.target_temperature
     }
 
-    pub fn set_immediate(&mut self, temp: u16) {
-        self.current_temperature = temp;
-        self.transition_start_temp = temp;
-        self.target_temperature = temp;
-        self.phase_start_time = std::time::Instant::now();
-        self.in_transition = false;
+    pub fn transition_start_temp(&self) -> u16 {
+        self.transition_start_temp
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use std::time::Duration;
+
+    #[test]
+    fn update_sets_progress_complete_when_at_target() {
+        let config = Config::default();
+        let mut transition = Transition::new_with_temp(config, 1500);
+
+        transition.update(1500);
+
+        assert_eq!(transition.current_temperature(), 1500);
+        assert_eq!(transition.progress(), 1.0);
+        assert!(!transition.in_transition);
+    }
+
+    #[test]
+    fn update_completes_after_elapsed_duration() {
+        let mut config = Config::default();
+        config.transition.duration_minutes = 1;
+        let mut transition = Transition::new_with_temp(config, 6500);
+
+        transition.update(1500);
+        transition.phase_start_time = std::time::Instant::now() - Duration::from_secs(60);
+        transition.in_transition = true;
+
+        transition.update(1500);
+
+        assert_eq!(transition.current_temperature(), 1500);
+        assert_eq!(transition.progress(), 1.0);
+        assert!(!transition.in_transition);
+    }
+
+    #[test]
+    fn easing_linear_at_halfway() {
+        let mut config = Config::default();
+        config.transition.duration_minutes = 1;
+        let mut transition = Transition::new_with_temp(config, 6500);
+
+        transition.update(1500);
+        transition.phase_start_time = std::time::Instant::now() - Duration::from_secs(30);
+        transition.in_transition = true;
+
+        transition.update(1500);
+
+        assert_eq!(transition.current_temperature(), 4000);
+    }
+
+    #[test]
+    fn easing_ease_in_at_halfway() {
+        let mut config = Config::default();
+        config.transition.duration_minutes = 1;
+        config.transition.easing = "ease_in".to_string();
+        let mut transition = Transition::new_with_temp(config, 6500);
+
+        transition.update(1500);
+        transition.phase_start_time = std::time::Instant::now() - Duration::from_secs(30);
+        transition.in_transition = true;
+
+        transition.update(1500);
+
+        assert_eq!(transition.current_temperature(), 5250);
+    }
+
+    #[test]
+    fn easing_ease_out_at_halfway() {
+        let mut config = Config::default();
+        config.transition.duration_minutes = 1;
+        config.transition.easing = "ease_out".to_string();
+        let mut transition = Transition::new_with_temp(config, 6500);
+
+        transition.update(1500);
+        transition.phase_start_time = std::time::Instant::now() - Duration::from_secs(30);
+        transition.in_transition = true;
+
+        transition.update(1500);
+
+        assert_eq!(transition.current_temperature(), 2750);
+    }
+
+    #[test]
+    fn easing_ease_in_out_at_halfway() {
+        let mut config = Config::default();
+        config.transition.duration_minutes = 1;
+        config.transition.easing = "ease_in_out".to_string();
+        let mut transition = Transition::new_with_temp(config, 6500);
+
+        transition.update(1500);
+        transition.phase_start_time = std::time::Instant::now() - Duration::from_secs(30);
+        transition.in_transition = true;
+
+        transition.update(1500);
+
+        assert_eq!(transition.current_temperature(), 4000);
     }
 }
