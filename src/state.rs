@@ -80,6 +80,7 @@ fn apply_easing(t: f64, easing: &str) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn calculate_temperature_uses_saved_state_mid_transition() {
@@ -122,5 +123,159 @@ mod tests {
 
         // ease_in at 0.5 progress -> eased 0.25
         assert_eq!(temp, 5250);
+    }
+
+    #[test]
+    fn easing_applied_for_ease_out() {
+        let state = State {
+            transition_start_temp: 6500,
+            transition_start_timestamp: 0,
+            elapsed_seconds: 1800,
+            target_temp: 1500,
+        };
+
+        let temp = calculate_temperature_from_state(&state, 3600, "ease_out");
+
+        // ease_out at 0.5 progress -> eased 0.75
+        assert_eq!(temp, 2750);
+    }
+
+    #[test]
+    fn easing_applied_for_ease_in_out() {
+        let state = State {
+            transition_start_temp: 6500,
+            transition_start_timestamp: 0,
+            elapsed_seconds: 1800,
+            target_temp: 1500,
+        };
+
+        let temp = calculate_temperature_from_state(&state, 3600, "ease_in_out");
+
+        // ease_in_out at 0.5 progress -> eased 0.5 (linear at midpoint)
+        assert_eq!(temp, 4000);
+    }
+
+    #[test]
+    fn easing_unknown_defaults_to_linear() {
+        let state = State {
+            transition_start_temp: 6500,
+            transition_start_timestamp: 0,
+            elapsed_seconds: 1800,
+            target_temp: 1500,
+        };
+
+        let temp = calculate_temperature_from_state(&state, 3600, "unknown");
+
+        // Unknown easing should default to linear
+        assert_eq!(temp, 4000);
+    }
+
+    #[test]
+    fn apply_easing_linear() {
+        assert_eq!(apply_easing(0.0, "linear"), 0.0);
+        assert_eq!(apply_easing(0.5, "linear"), 0.5);
+        assert_eq!(apply_easing(1.0, "linear"), 1.0);
+    }
+
+    #[test]
+    fn apply_easing_ease_in() {
+        assert_eq!(apply_easing(0.0, "ease_in"), 0.0);
+        assert_eq!(apply_easing(0.5, "ease_in"), 0.25);
+        assert_eq!(apply_easing(1.0, "ease_in"), 1.0);
+    }
+
+    #[test]
+    fn apply_easing_ease_out() {
+        assert_eq!(apply_easing(0.0, "ease_out"), 0.0);
+        assert_eq!(apply_easing(0.5, "ease_out"), 0.75);
+        assert_eq!(apply_easing(1.0, "ease_out"), 1.0);
+    }
+
+    #[test]
+    fn apply_easing_ease_in_out() {
+        assert_eq!(apply_easing(0.0, "ease_in_out"), 0.0);
+        assert_eq!(apply_easing(0.25, "ease_in_out"), 0.125);
+        assert_eq!(apply_easing(0.5, "ease_in_out"), 0.5);
+        assert_eq!(apply_easing(0.75, "ease_in_out"), 0.875);
+        assert_eq!(apply_easing(1.0, "ease_in_out"), 1.0);
+    }
+
+    #[test]
+    fn state_save_and_load() {
+        let temp_dir = TempDir::new().unwrap();
+        let state_path = temp_dir.path().join("state.toml");
+        
+        let state = State {
+            transition_start_temp: 6500,
+            transition_start_timestamp: 1234567890,
+            elapsed_seconds: 1800,
+            target_temp: 1500,
+        };
+
+        state.save(state_path.to_str().unwrap()).unwrap();
+        let loaded = State::load(state_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(loaded.transition_start_temp, 6500);
+        assert_eq!(loaded.transition_start_timestamp, 1234567890);
+        assert_eq!(loaded.elapsed_seconds, 1800);
+        assert_eq!(loaded.target_temp, 1500);
+    }
+
+    #[test]
+    fn state_load_nonexistent_returns_none() {
+        let result = State::load("/nonexistent/path/state.toml");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn state_age_seconds_calculates_correctly() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let state = State {
+            transition_start_temp: 6500,
+            transition_start_timestamp: now - 100,
+            elapsed_seconds: 50,
+            target_temp: 1500,
+        };
+
+        let age = state.age_seconds();
+        
+        // Age should be approximately the time since (timestamp + elapsed)
+        // which is now - (now - 100 + 50) = 50 seconds
+        assert!(age >= 49 && age <= 51);
+    }
+
+    #[test]
+    fn expand_path_with_tilde() {
+        let result = expand_path("~/test/path");
+        assert!(result.is_some());
+        let path = result.unwrap();
+        assert!(!path.to_string_lossy().contains("~"));
+    }
+
+    #[test]
+    fn expand_path_without_tilde() {
+        let result = expand_path("/absolute/path");
+        assert_eq!(result, Some(std::path::PathBuf::from("/absolute/path")));
+    }
+
+    #[test]
+    fn state_save_creates_parent_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let nested_path = temp_dir.path().join("nested").join("dir").join("state.toml");
+        
+        let state = State {
+            transition_start_temp: 6500,
+            transition_start_timestamp: 1234567890,
+            elapsed_seconds: 1800,
+            target_temp: 1500,
+        };
+
+        let result = state.save(nested_path.to_str().unwrap());
+        assert!(result.is_ok());
+        assert!(nested_path.exists());
     }
 }
