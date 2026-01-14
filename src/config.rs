@@ -240,3 +240,52 @@ fn apply_env(config: &mut Config) {
         config.daemon.state_file = val;
     }
 }
+
+const MIN_TEMPERATURE: u16 = 1000;
+const MAX_TEMPERATURE: u16 = 25000;
+
+impl Config {
+    pub fn validate(&self) -> Result<(), String> {
+        // Validate temperature ranges
+        if self.temperature.day < MIN_TEMPERATURE || self.temperature.day > MAX_TEMPERATURE {
+            return Err(format!(
+                "Day temperature {} is out of valid range ({}-{}K)",
+                self.temperature.day, MIN_TEMPERATURE, MAX_TEMPERATURE
+            ));
+        }
+        if self.temperature.night < MIN_TEMPERATURE || self.temperature.night > MAX_TEMPERATURE {
+            return Err(format!(
+                "Night temperature {} is out of valid range ({}-{}K)",
+                self.temperature.night, MIN_TEMPERATURE, MAX_TEMPERATURE
+            ));
+        }
+
+        // Validate coordinates for auto mode
+        if self.mode == Mode::Auto {
+            if self.location.latitude < -90.0 || self.location.latitude > 90.0 {
+                return Err(format!(
+                    "Latitude {} is out of valid range (-90 to 90)",
+                    self.location.latitude
+                ));
+            }
+            if self.location.longitude < -180.0 || self.location.longitude > 180.0 {
+                return Err(format!(
+                    "Longitude {} is out of valid range (-180 to 180)",
+                    self.location.longitude
+                ));
+            }
+        }
+
+        // Validate easing function
+        let valid_easings = ["linear", "ease_in", "ease_out", "ease_in_out"];
+        if !valid_easings.contains(&self.transition.easing.as_str()) {
+            return Err(format!(
+                "Unknown easing function '{}'. Valid options: {}",
+                self.transition.easing,
+                valid_easings.join(", ")
+            ));
+        }
+
+        Ok(())
+    }
+}

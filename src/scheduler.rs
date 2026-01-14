@@ -32,6 +32,15 @@ impl Schedule {
     pub fn new(config: Config) -> Result<Self, String> {
         let wakeup_time = parse_time("wakeup", &config.schedule.wakeup)?;
         let bedtime_time = parse_time("bedtime", &config.schedule.bedtime)?;
+
+        // Validate that wakeup is before bedtime in fixed mode
+        if config.mode == Mode::Fixed && wakeup_time >= bedtime_time {
+            return Err(format!(
+                "In fixed mode, wakeup time ({}) must be before bedtime ({})",
+                config.schedule.wakeup, config.schedule.bedtime
+            ));
+        }
+
         let coordinates = Coordinates::new(config.location.latitude, config.location.longitude)
             .ok_or_else(|| {
                 format!(
@@ -78,6 +87,8 @@ impl Schedule {
         } else if now < sunrise - transition_duration {
             Phase::Night
         } else {
+            // Covers: sunrise - transition_duration <= now < sunrise
+            // This is the pre-sunrise transition to day period
             Phase::TransitioningToDay
         }
     }
