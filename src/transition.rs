@@ -62,10 +62,11 @@ impl Transition {
         let progress = elapsed.as_secs_f64() / duration.as_secs_f64();
         let eased_progress = self.apply_easing(progress);
 
-        let temp_range = self.target_temperature as i16 - self.transition_start_temp as i16;
-        let temp_delta = (temp_range as f64 * eased_progress) as i16;
+        let temp_range = self.target_temperature as i32 - self.transition_start_temp as i32;
+        let temp_delta = (temp_range as f64 * eased_progress) as i32;
+        let result = (self.transition_start_temp as i32 + temp_delta).clamp(0, u16::MAX as i32);
 
-        self.current_temperature = (self.transition_start_temp as i16 + temp_delta) as u16;
+        self.current_temperature = result as u16;
     }
 
     fn apply_easing(&self, t: f64) -> f64 {

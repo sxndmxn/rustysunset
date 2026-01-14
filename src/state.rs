@@ -23,7 +23,8 @@ impl State {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let content = toml::to_string(self).unwrap_or_default();
+        let content = toml::to_string(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
         fs::write(&path, content)
     }
 
@@ -37,8 +38,10 @@ impl State {
 }
 
 fn expand_path(path: &str) -> Option<PathBuf> {
-    if path.starts_with("~") {
-        dirs::home_dir().map(|home| home.join(&path[2..]))
+    if path == "~" {
+        dirs::home_dir()
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        dirs::home_dir().map(|home| home.join(rest))
     } else {
         Some(PathBuf::from(path))
     }
@@ -56,10 +59,11 @@ pub fn calculate_temperature_from_state(
     let progress = state.elapsed_seconds as f64 / transition_duration_seconds as f64;
     let eased_progress = apply_easing(progress, easing);
 
-    let temp_range = state.target_temp as i16 - state.transition_start_temp as i16;
-    let temp_delta = (temp_range as f64 * eased_progress) as i16;
+    let temp_range = state.target_temp as i32 - state.transition_start_temp as i32;
+    let temp_delta = (temp_range as f64 * eased_progress) as i32;
+    let result = (state.transition_start_temp as i32 + temp_delta).clamp(0, u16::MAX as i32);
 
-    (state.transition_start_temp as i16 + temp_delta) as u16
+    result as u16
 }
 
 fn apply_easing(t: f64, easing: &str) -> f64 {

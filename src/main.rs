@@ -88,6 +88,12 @@ fn main() {
 
     let config = config::load(config_path.as_deref());
 
+    // Validate config before proceeding
+    if let Err(e) = config.validate() {
+        eprintln!("Configuration error: {}", e);
+        process::exit(1);
+    }
+
     match args.command {
         Some(Commands::Daemon) | None => {
             if let Err(e) = run_daemon(config.clone(), args.dry_run, args.quiet) {
@@ -130,20 +136,29 @@ fn main() {
                 // Clear state file - this is an immediate override, not a transition
                 let state_file = expand_path(&config.daemon.state_file);
                 if let Some(ref p) = state_file {
-                    let _ = fs::remove_file(p);
+                    if let Err(e) = fs::remove_file(p) {
+                        if e.kind() != std::io::ErrorKind::NotFound {
+                            log::warn!("Failed to remove state file: {}", e);
+                        }
+                    }
                 }
                 // Also update status file
                 let status = format!(
                     "temp={}\nphase=manual\ntarget={}\nprogress=1.00\n",
                     temperature, temperature
                 );
-                let _ = fs::write(&config.daemon.status_file, status);
+                if let Err(e) = fs::write(&config.daemon.status_file, &status) {
+                    log::warn!("Failed to write status file: {}", e);
+                }
             }
         }
         Some(Commands::Pause) => {
             // Write pause command to control file
             let control_file = control_file_from_status(&config.daemon.status_file);
-            let _ = fs::write(&control_file, "pause\n");
+            if let Err(e) = fs::write(&control_file, "pause\n") {
+                eprintln!("Failed to write control file: {}", e);
+                process::exit(1);
+            }
             if !args.quiet {
                 println!("Paused");
             }
@@ -151,24 +166,41 @@ fn main() {
         Some(Commands::Resume) => {
             // Write resume command to control file
             let control_file = control_file_from_status(&config.daemon.status_file);
-            let _ = fs::write(&control_file, "resume\n");
+            if let Err(e) = fs::write(&control_file, "resume\n") {
+                eprintln!("Failed to write control file: {}", e);
+                process::exit(1);
+            }
             if !args.quiet {
                 println!("Resumed");
             }
         }
         Some(Commands::Config) => {
             if args.json {
-                println!("{}", serde_json::to_string(&config).unwrap());
+                match serde_json::to_string(&config) {
+                    Ok(json) => println!("{}", json),
+                    Err(e) => {
+                        eprintln!("Failed to serialize config to JSON: {}", e);
+                        process::exit(1);
+                    }
+                }
             } else {
-                println!("{}", toml::to_string_pretty(&config).unwrap());
+                match toml::to_string_pretty(&config) {
+                    Ok(toml) => println!("{}", toml),
+                    Err(e) => {
+                        eprintln!("Failed to serialize config to TOML: {}", e);
+                        process::exit(1);
+                    }
+                }
             }
         }
     }
 }
 
 fn expand_path(path: &str) -> Option<std::path::PathBuf> {
-    if path.starts_with("~") {
-        dirs::home_dir().map(|home| home.join(&path[2..]))
+    if path == "~" {
+        dirs::home_dir()
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        dirs::home_dir().map(|home| home.join(rest))
     } else {
         Some(std::path::PathBuf::from(path))
     }
@@ -209,9 +241,11 @@ fn run_daemon(
     let paused = Arc::new(AtomicBool::new(false));
 
     // Set up signal handler for graceful shutdown
-    let result = ctrlc::set_handler(move || {
+    if let Err(e) = ctrlc::set_handler(move || {
         shutdown_clone.store(true, Ordering::SeqCst);
-    });
+    }) {
+        return Err(format!("Failed to set signal handler: {}", e).into());
+    }
 
     // Check for control file commands
     let control_file = control_file_from_status(&config.daemon.status_file);
@@ -265,21 +299,24 @@ fn run_daemon(
     let mut last_set_temperature: Option<u16> = None;
 
     loop {
-        // Check control file for commands
-        if let Ok(content) = fs::read_to_string(&control_file) {
-            for line in content.lines() {
-                match line.trim() {
-                    "pause" => {
-                        paused.store(true, Ordering::SeqCst);
+        // Check control file for commands using atomic rename to prevent race conditions
+        let control_file_tmp = control_file.with_extension("control.tmp");
+        if fs::rename(&control_file, &control_file_tmp).is_ok() {
+            if let Ok(content) = fs::read_to_string(&control_file_tmp) {
+                for line in content.lines() {
+                    match line.trim() {
+                        "pause" => {
+                            paused.store(true, Ordering::SeqCst);
+                        }
+                        "resume" => {
+                            paused.store(false, Ordering::SeqCst);
+                        }
+                        _ => {}
                     }
-                    "resume" => {
-                        paused.store(false, Ordering::SeqCst);
-                    }
-                    _ => {}
                 }
             }
-            // Clear control file after reading
-            let _ = fs::write(&control_file, "");
+            // Remove temp file after processing
+            let _ = fs::remove_file(&control_file_tmp);
         }
 
         if shutdown.load(Ordering::SeqCst) {
@@ -298,7 +335,9 @@ fn run_daemon(
                     elapsed_seconds: elapsed as u64,
                     target_temp: transition.target_temperature(),
                 };
-                let _ = state.save(&state_file);
+                if let Err(e) = state.save(&state_file) {
+                    log::warn!("Failed to save state on shutdown: {}", e);
+                }
             }
             break;
         }
@@ -347,15 +386,13 @@ fn run_daemon(
                     target,
                     progress
                 );
-                let _ = fs::write(&status_file, status);
+                if let Err(e) = fs::write(&status_file, &status) {
+                    log::warn!("Failed to write status file: {}", e);
+                }
             }
         }
 
         thread::sleep(tick_interval);
-    }
-
-    if let Err(e) = result {
-        eprintln!("Error setting signal handler: {}", e);
     }
 
     Ok(())
