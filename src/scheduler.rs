@@ -1,5 +1,5 @@
 use crate::config::{Config, Mode};
-use chrono::{DateTime, Duration, Local, NaiveTime};
+use chrono::{DateTime, Duration, Local, NaiveDate, NaiveTime, TimeZone};
 use sunrise::{Coordinates, SolarDay, SolarEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -19,6 +19,12 @@ impl Phase {
             Phase::TransitioningToDay => "transitioning_to_day",
         }
     }
+}
+
+pub struct TransitionWindow {
+    pub start: DateTime<Local>,
+    pub start_temp: u16,
+    pub target_temp: u16,
 }
 
 pub struct Schedule {
@@ -107,6 +113,76 @@ impl Schedule {
             Phase::Night | Phase::TransitioningToNight => self.config.temperature.night,
         }
     }
+
+    pub fn transition_window_at(&self, now: DateTime<Local>) -> Option<TransitionWindow> {
+        let duration = Duration::minutes(self.config.transition.duration_minutes as i64);
+        if duration.is_zero() {
+            return None;
+        }
+
+        match self.config.mode {
+            Mode::Auto => self.auto_transition_window(now, duration),
+            Mode::Fixed => self.fixed_transition_window(now, duration),
+        }
+    }
+
+    fn auto_transition_window(
+        &self,
+        now: DateTime<Local>,
+        duration: Duration,
+    ) -> Option<TransitionWindow> {
+        let (sunrise, sunset) = sunrise_sunset_local(&self.coordinates, now);
+
+        let to_night_start = sunset - duration;
+        if now >= to_night_start && now < sunset {
+            return Some(TransitionWindow {
+                start: to_night_start,
+                start_temp: self.config.temperature.day,
+                target_temp: self.config.temperature.night,
+            });
+        }
+
+        let to_day_start = sunrise - duration;
+        if now >= to_day_start && now < sunrise {
+            return Some(TransitionWindow {
+                start: to_day_start,
+                start_temp: self.config.temperature.night,
+                target_temp: self.config.temperature.day,
+            });
+        }
+
+        None
+    }
+
+    fn fixed_transition_window(
+        &self,
+        now: DateTime<Local>,
+        duration: Duration,
+    ) -> Option<TransitionWindow> {
+        let date = now.date_naive();
+        let wakeup_dt = local_datetime(date, self.wakeup_time);
+        let bedtime_dt = local_datetime(date, self.bedtime_time);
+
+        let wakeup_end = wakeup_dt + duration;
+        if now >= wakeup_dt && now < wakeup_end {
+            return Some(TransitionWindow {
+                start: wakeup_dt,
+                start_temp: self.config.temperature.night,
+                target_temp: self.config.temperature.day,
+            });
+        }
+
+        let bedtime_start = bedtime_dt - duration;
+        if now >= bedtime_start && now < bedtime_dt {
+            return Some(TransitionWindow {
+                start: bedtime_start,
+                start_temp: self.config.temperature.day,
+                target_temp: self.config.temperature.night,
+            });
+        }
+
+        None
+    }
 }
 
 fn parse_time(label: &str, value: &str) -> Result<NaiveTime, String> {
@@ -125,6 +201,15 @@ fn sunrise_sunset_local(coordinates: &Coordinates, now: DateTime<Local>) -> (Dat
         .with_timezone(&Local);
 
     (sunrise, sunset)
+}
+
+fn local_datetime(date: NaiveDate, time: NaiveTime) -> DateTime<Local> {
+    let naive = date.and_time(time);
+    Local.from_local_datetime(&naive)
+        .single()
+        .or_else(|| Local.from_local_datetime(&naive).earliest())
+        .or_else(|| Local.from_local_datetime(&naive).latest())
+        .unwrap()
 }
 
 #[cfg(test)]
