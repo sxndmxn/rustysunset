@@ -1,4 +1,4 @@
-# rustysunset
+# rustysunset [WIP]
 
 Smooth color temperature transitions for hyprsunset.
 
