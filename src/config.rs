@@ -2,20 +2,16 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
+    #[default]
     Auto,
     Fixed,
 }
 
-impl Default for Mode {
-    fn default() -> Self {
-        Mode::Auto
-    }
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Location {
     pub latitude: f64,
     pub longitude: f64,
@@ -31,6 +27,7 @@ impl Default for Location {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Schedule {
     pub wakeup: String,
     pub bedtime: String,
@@ -46,6 +43,7 @@ impl Default for Schedule {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Transition {
     pub duration_minutes: u32,
     pub easing: String,
@@ -61,6 +59,7 @@ impl Default for Transition {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Temperature {
     pub day: u16,
     pub night: u16,
@@ -76,6 +75,7 @@ impl Default for Temperature {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Daemon {
     pub tick_interval_seconds: u64,
     pub status_file: String,
@@ -96,7 +96,8 @@ impl Default for Daemon {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Config {
     pub mode: Mode,
     pub location: Location,
@@ -106,19 +107,6 @@ pub struct Config {
     pub daemon: Daemon,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            mode: Mode::default(),
-            location: Location::default(),
-            schedule: Schedule::default(),
-            transition: Transition::default(),
-            temperature: Temperature::default(),
-            daemon: Daemon::default(),
-        }
-    }
-}
-
 pub fn find_config() -> Option<PathBuf> {
     let config_locations = [
         PathBuf::from("rustysunset.toml"),
@@ -126,13 +114,7 @@ pub fn find_config() -> Option<PathBuf> {
         dirs::config_dir()?.join("rustysunset.toml"),
     ];
 
-    for path in config_locations {
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    None
+    config_locations.into_iter().find(|path| path.exists())
 }
 
 pub fn load(path: Option<&str>) -> Config {
@@ -142,7 +124,7 @@ pub fn load(path: Option<&str>) -> Config {
             match toml::from_str(&content) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("Error parsing config: {}", e);
+                    eprintln!("Error parsing config: {e}");
                     Config::default()
                 }
             }

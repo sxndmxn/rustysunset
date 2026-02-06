@@ -17,6 +17,7 @@ mod transition;
 #[command(author = "rustysunset developers")]
 #[command(version = "0.1.0")]
 #[command(about = "Smooth color temperature transitions for hyprsunset", long_about = None)]
+#[allow(clippy::struct_excessive_bools)]
 struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -90,7 +91,7 @@ fn main() {
 
     match args.command {
         Some(Commands::Daemon) | None => {
-            if let Err(e) = run_daemon(config.clone(), args.dry_run, args.quiet) {
+            if let Err(e) = run_daemon(&config, args.dry_run, args.quiet) {
                 eprintln!("Daemon error: {e}");
                 process::exit(1);
             }
@@ -98,9 +99,9 @@ fn main() {
         Some(Commands::Now) => {
             let (temp, _, _, _) = read_status_file(&config.daemon.status_file);
             if args.json {
-                println!(r#"{{"temp":{}}}"#, temp);
+                println!(r#"{{"temp":{temp}}}"#);
             } else {
-                println!("{}K", temp);
+                println!("{temp}K");
             }
         }
         Some(Commands::Status) => {
@@ -108,19 +109,18 @@ fn main() {
 
             if args.json {
                 println!(
-                    r#"{{"temp":{},"phase":"{}","target":{},"progress":{:.2}}}"#,
-                    temp, phase, target, progress
+                    r#"{{"temp":{temp},"phase":"{phase}","target":{target},"progress":{progress:.2}}}"#,
                 );
             } else {
-                println!("temp={}", temp);
-                println!("phase={}", phase);
-                println!("target={}", target);
-                println!("progress={:.2}", progress);
+                println!("temp={temp}");
+                println!("phase={phase}");
+                println!("target={target}");
+                println!("progress={progress:.2}");
             }
         }
         Some(Commands::Set { temperature }) => {
             if !args.quiet {
-                println!("Setting temperature to {}K", temperature);
+                println!("Setting temperature to {temperature}K");
             }
             if !args.dry_run {
                 if let Err(e) = hyprctl::set_temperature(temperature) {
@@ -134,8 +134,7 @@ fn main() {
                 }
                 // Also update status file
                 let status = format!(
-                    "temp={}\nphase=manual\ntarget={}\nprogress=1.00\n",
-                    temperature, temperature
+                    "temp={temperature}\nphase=manual\ntarget={temperature}\nprogress=1.00\n",
                 );
                 let _ = fs::write(&config.daemon.status_file, status);
             }
@@ -167,7 +166,7 @@ fn main() {
 }
 
 fn expand_path(path: &str) -> Option<std::path::PathBuf> {
-    if path.starts_with("~") {
+    if path.starts_with('~') {
         dirs::home_dir().map(|home| home.join(&path[2..]))
     } else {
         Some(std::path::PathBuf::from(path))
@@ -189,8 +188,9 @@ fn should_set_temperature(optimize_updates: bool, last_sent: Option<u16>, curren
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_daemon(
-    config: config::Config,
+    config: &config::Config,
     dry_run: bool,
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -227,16 +227,15 @@ fn run_daemon(
 
         // Check for saved state
         if let Some(saved_state) = state::State::load(&state_file) {
-            let max_age = config.transition.duration_minutes as u64 * 60 * 2;
+            let max_age = u64::from(config.transition.duration_minutes) * 60 * 2;
             if saved_state.age_seconds() < max_age {
                 // Resume from saved state
                 log::info!("Resuming transition from saved state");
-                let temp = state::calculate_temperature_from_state(
+                state::calculate_temperature_from_state(
                     &saved_state,
-                    config.transition.duration_minutes as u64 * 60,
+                    u64::from(config.transition.duration_minutes) * 60,
                     &config.transition.easing,
-                );
-                temp
+                )
             } else {
                 // State too old, use calculated target
                 log::info!("Saved state too old, calculating fresh");
@@ -295,7 +294,7 @@ fn run_daemon(
                 let state = state::State {
                     transition_start_temp: transition.transition_start_temp(),
                     transition_start_timestamp: start,
-                    elapsed_seconds: elapsed as u64,
+                    elapsed_seconds: elapsed,
                     target_temp: transition.target_temperature(),
                 };
                 let _ = state.save(&state_file);
@@ -308,9 +307,22 @@ fn run_daemon(
             continue;
         }
 
-        let phase = scheduler.current_phase();
-        let target_temp = scheduler.target_temperature();
-        transition.update(target_temp);
+        let now = chrono::Local::now();
+        let phase = scheduler.current_phase_at(now);
+        let target_temp = match phase {
+            scheduler::Phase::Day | scheduler::Phase::TransitioningToDay => config.temperature.day,
+            scheduler::Phase::Night | scheduler::Phase::TransitioningToNight => {
+                config.temperature.night
+            }
+        };
+
+        if let Some(window) = scheduler.transition_window_at(now) {
+            let elapsed = now.signed_duration_since(window.start);
+            let elapsed = elapsed.to_std().unwrap_or_default();
+            transition.align_with_schedule(window.start_temp, window.target_temp, elapsed);
+        } else {
+            transition.update(target_temp);
+        }
 
         let temp = transition.current_temperature();
         let target = transition.target_temperature();
@@ -318,21 +330,17 @@ fn run_daemon(
 
         if !quiet {
             log::info!(
-                "Phase: {:?}, Temp: {}, Target: {}, Progress: {:.2}",
-                phase,
-                temp,
-                target,
-                progress
+                "Phase: {phase:?}, Temp: {temp}, Target: {target}, Progress: {progress:.2}",
             );
         }
 
         if !dry_run {
             if should_set_temperature(config.daemon.optimize_updates, last_set_temperature, temp) {
                 if let Err(e) = hyprctl::set_temperature(temp) {
-                    eprintln!("Error setting temperature: {}", e);
+                    eprintln!("Error setting temperature: {e}");
                 } else {
                     last_set_temperature = Some(temp);
-                    log::info!("Set temperature to {}", temp);
+                    log::info!("Set temperature to {temp}");
                 }
             }
 
@@ -341,11 +349,8 @@ fn run_daemon(
             if tick_count >= status_update_interval {
                 tick_count = 0;
                 let status = format!(
-                    "temp={}\nphase={}\ntarget={}\nprogress={:.2}\n",
-                    temp,
-                    phase.as_str(),
-                    target,
-                    progress
+                    "temp={temp}\nphase={phase}\ntarget={target}\nprogress={progress:.2}\n",
+                    phase = phase.as_str(),
                 );
                 let _ = fs::write(&status_file, status);
             }
@@ -355,7 +360,7 @@ fn run_daemon(
     }
 
     if let Err(e) = result {
-        eprintln!("Error setting signal handler: {}", e);
+        eprintln!("Error setting signal handler: {e}");
     }
 
     Ok(())

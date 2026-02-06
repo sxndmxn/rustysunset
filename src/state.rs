@@ -37,13 +37,20 @@ impl State {
 }
 
 fn expand_path(path: &str) -> Option<PathBuf> {
-    if path.starts_with("~") {
+    if path.starts_with('~') {
         dirs::home_dir().map(|home| home.join(&path[2..]))
     } else {
         Some(PathBuf::from(path))
     }
 }
 
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless
+)]
 pub fn calculate_temperature_from_state(
     state: &State,
     transition_duration_seconds: u64,

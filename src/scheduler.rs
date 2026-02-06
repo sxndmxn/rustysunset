@@ -11,12 +11,12 @@ pub enum Phase {
 }
 
 impl Phase {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
-            Phase::Day => "day",
-            Phase::TransitioningToNight => "transitioning_to_night",
-            Phase::Night => "night",
-            Phase::TransitioningToDay => "transitioning_to_day",
+            Self::Day => "day",
+            Self::TransitioningToNight => "transitioning_to_night",
+            Self::Night => "night",
+            Self::TransitioningToDay => "transitioning_to_day",
         }
     }
 }
@@ -68,16 +68,16 @@ impl Schedule {
     fn auto_phase(&self, now: DateTime<Local>) -> Phase {
         let (sunrise, sunset) = sunrise_sunset_local(&self.coordinates, now);
 
-        let transition_duration = Duration::minutes(self.config.transition.duration_minutes as i64);
+        let transition_duration = Duration::minutes(i64::from(self.config.transition.duration_minutes));
         let next_sunrise = sunrise + Duration::days(1);
 
         if now >= sunset && now < next_sunrise - transition_duration {
             Phase::Night
-        } else if now >= next_sunrise - transition_duration && now < next_sunrise {
+        } else if (now >= next_sunrise - transition_duration && now < next_sunrise)
+            || (now >= sunrise - transition_duration && now < sunrise)
+        {
             Phase::TransitioningToDay
-        } else if now >= sunrise && now < sunrise + transition_duration {
-            Phase::TransitioningToDay
-        } else if now >= sunrise + transition_duration && now < sunset - transition_duration {
+        } else if now >= sunrise && now < sunset - transition_duration {
             Phase::Day
         } else if now >= sunset - transition_duration && now < sunset {
             Phase::TransitioningToNight
@@ -91,7 +91,7 @@ impl Schedule {
     fn fixed_phase(&self, now: DateTime<Local>) -> Phase {
         let now_time = now.time();
 
-        let transition_duration = Duration::minutes(self.config.transition.duration_minutes as i64);
+        let transition_duration = Duration::minutes(i64::from(self.config.transition.duration_minutes));
         let transition_start = self.bedtime_time - transition_duration;
         let transition_end = self.wakeup_time + transition_duration;
 
@@ -115,7 +115,7 @@ impl Schedule {
     }
 
     pub fn transition_window_at(&self, now: DateTime<Local>) -> Option<TransitionWindow> {
-        let duration = Duration::minutes(self.config.transition.duration_minutes as i64);
+        let duration = Duration::minutes(i64::from(self.config.transition.duration_minutes));
         if duration.is_zero() {
             return None;
         }
@@ -187,7 +187,7 @@ impl Schedule {
 
 fn parse_time(label: &str, value: &str) -> Result<NaiveTime, String> {
     NaiveTime::parse_from_str(value, "%H:%M")
-        .map_err(|e| format!("Invalid {} time '{}': {}", label, value, e))
+        .map_err(|e| format!("Invalid {label} time '{value}': {e}"))
 }
 
 fn sunrise_sunset_local(coordinates: &Coordinates, now: DateTime<Local>) -> (DateTime<Local>, DateTime<Local>) {

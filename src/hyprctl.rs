@@ -2,12 +2,12 @@ use std::process::Command;
 
 pub fn set_temperature(kelvin: u16) -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new("hyprctl")
-        .args(&["hyprsunset", "temperature", &kelvin.to_string()])
+        .args(["hyprsunset", "temperature", &kelvin.to_string()])
         .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("hyprctl failed: {}", stderr).into());
+        return Err(format!("hyprctl failed: {stderr}").into());
     }
 
     Ok(())

@@ -1,5 +1,6 @@
 use crate::config::Config;
 
+#[allow(clippy::struct_field_names)]
 pub struct Transition {
     config: Config,
     current_temperature: u16,
@@ -23,9 +24,15 @@ impl Transition {
         }
     }
 
+    #[allow(
+        clippy::cast_possible_wrap,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_lossless
+    )]
     pub fn update(&mut self, target_temp: u16) {
         let duration =
-            std::time::Duration::from_secs(60 * self.config.transition.duration_minutes as u64);
+            std::time::Duration::from_secs(60 * u64::from(self.config.transition.duration_minutes));
 
         if duration.is_zero() {
             self.current_temperature = target_temp;
@@ -68,6 +75,48 @@ impl Transition {
         self.current_temperature = (self.transition_start_temp as i16 + temp_delta) as u16;
     }
 
+    #[allow(
+        clippy::cast_possible_wrap,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_lossless
+    )]
+    pub fn align_with_schedule(
+        &mut self,
+        start_temp: u16,
+        target_temp: u16,
+        elapsed: std::time::Duration,
+    ) {
+        let duration =
+            std::time::Duration::from_secs(60 * u64::from(self.config.transition.duration_minutes));
+
+        if duration.is_zero() {
+            self.current_temperature = target_temp;
+            self.target_temperature = target_temp;
+            self.transition_start_temp = start_temp;
+            self.transition_start_timestamp = current_unix_timestamp();
+            self.phase_start_time = std::time::Instant::now();
+            self.in_transition = false;
+            return;
+        }
+
+        let clamped_elapsed = if elapsed > duration { duration } else { elapsed };
+        let progress = clamped_elapsed.as_secs_f64() / duration.as_secs_f64();
+        let eased_progress = self.apply_easing(progress);
+
+        let temp_range = target_temp as i16 - start_temp as i16;
+        let temp_delta = (temp_range as f64 * eased_progress) as i16;
+
+        self.current_temperature = (start_temp as i16 + temp_delta) as u16;
+        self.transition_start_temp = start_temp;
+        self.target_temperature = target_temp;
+        self.phase_start_time = std::time::Instant::now()
+            .checked_sub(clamped_elapsed)
+            .unwrap_or_else(std::time::Instant::now);
+        self.transition_start_timestamp = current_unix_timestamp().saturating_sub(clamped_elapsed.as_secs());
+        self.in_transition = clamped_elapsed < duration;
+    }
+
     fn apply_easing(&self, t: f64) -> f64 {
         match self.config.transition.easing.as_str() {
             "ease_in" => t * t,
@@ -90,7 +139,7 @@ impl Transition {
 
         let elapsed = self.phase_start_time.elapsed();
         let duration =
-            std::time::Duration::from_secs(60 * self.config.transition.duration_minutes as u64);
+            std::time::Duration::from_secs(60 * u64::from(self.config.transition.duration_minutes));
 
         if duration.is_zero() {
             return 1.0;
@@ -221,6 +270,17 @@ mod tests {
         transition.in_transition = true;
 
         transition.update(1500);
+
+        assert_eq!(transition.current_temperature(), 4000);
+    }
+
+    #[test]
+    fn align_with_schedule_sets_expected_temperature() {
+        let mut config = Config::default();
+        config.transition.duration_minutes = 60;
+        let mut transition = Transition::new_with_temp(config, 6500);
+
+        transition.align_with_schedule(6500, 1500, Duration::from_secs(1800));
 
         assert_eq!(transition.current_temperature(), 4000);
     }
