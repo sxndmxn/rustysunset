@@ -1,0 +1,20 @@
+[package]
+name = "rustysunset"
+version = "0.1.0"
+edition = "2021"
+description = "Smooth color temperature transitions for hyprsunset"
+authors = ["rustysunset developers"]
+license = "MIT"
+repository = "https://github.com/rustysunset/rustysunset"
+
+[dependencies]
+sunrise = "1.2"
+chrono = { version = "0.4", features = ["serde"] }
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.4", features = ["derive"] }
+env_logger = "0.10"
+log = "0.4"
+dirs = "5.0"
+ctrlc = "3.4"

@@ -2,4 +2,5 @@ target/
 Cargo.lock
 *.toml
 !rustysunset.toml
+!Cargo.toml
 .DS_Store
