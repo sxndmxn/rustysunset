@@ -2,7 +2,7 @@ use crate::config::{Config, Mode};
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveTime, TimeZone};
 use sunrise::{Coordinates, SolarDay, SolarEvent};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     Day,
     TransitioningToNight,
@@ -11,7 +11,7 @@ pub enum Phase {
 }
 
 impl Phase {
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Day => "day",
             Self::TransitioningToNight => "transitioning_to_night",
@@ -54,7 +54,7 @@ impl Schedule {
         })
     }
 
-    pub fn current_phase(&self) -> Phase {
+    fn current_phase(&self) -> Phase {
         self.current_phase_at(Local::now())
     }
 
@@ -160,8 +160,8 @@ impl Schedule {
         duration: Duration,
     ) -> Option<TransitionWindow> {
         let date = now.date_naive();
-        let wakeup_dt = local_datetime(date, self.wakeup_time);
-        let bedtime_dt = local_datetime(date, self.bedtime_time);
+        let wakeup_dt = local_datetime(date, self.wakeup_time)?;
+        let bedtime_dt = local_datetime(date, self.bedtime_time)?;
 
         let wakeup_end = wakeup_dt + duration;
         if now >= wakeup_dt && now < wakeup_end {
@@ -203,13 +203,12 @@ fn sunrise_sunset_local(coordinates: &Coordinates, now: DateTime<Local>) -> (Dat
     (sunrise, sunset)
 }
 
-fn local_datetime(date: NaiveDate, time: NaiveTime) -> DateTime<Local> {
+fn local_datetime(date: NaiveDate, time: NaiveTime) -> Option<DateTime<Local>> {
     let naive = date.and_time(time);
     Local.from_local_datetime(&naive)
         .single()
         .or_else(|| Local.from_local_datetime(&naive).earliest())
         .or_else(|| Local.from_local_datetime(&naive).latest())
-        .unwrap()
 }
 
 #[cfg(test)]

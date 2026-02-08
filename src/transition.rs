@@ -1,6 +1,6 @@
 use crate::config::Config;
 
-#[allow(clippy::struct_field_names)]
+#[allow(clippy::struct_field_names, reason = "fields mirror the domain terminology")]
 pub struct Transition {
     config: Config,
     current_temperature: u16,
@@ -28,7 +28,8 @@ impl Transition {
         clippy::cast_possible_wrap,
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
-        clippy::cast_lossless
+        clippy::cast_lossless,
+        reason = "temperature values are small enough that casts between u16/i16/f64 are safe"
     )]
     pub fn update(&mut self, target_temp: u16) {
         let duration =
@@ -79,7 +80,8 @@ impl Transition {
         clippy::cast_possible_wrap,
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
-        clippy::cast_lossless
+        clippy::cast_lossless,
+        reason = "temperature values are small enough that casts between u16/i16/f64 are safe"
     )]
     pub fn align_with_schedule(
         &mut self,
@@ -118,18 +120,7 @@ impl Transition {
     }
 
     fn apply_easing(&self, t: f64) -> f64 {
-        match self.config.transition.easing.as_str() {
-            "ease_in" => t * t,
-            "ease_out" => t * (2.0 - t),
-            "ease_in_out" => {
-                if t < 0.5 {
-                    2.0 * t * t
-                } else {
-                    -1.0 + (4.0 - 2.0 * t) * t
-                }
-            }
-            _ => t,
-        }
+        apply_easing(t, &self.config.transition.easing)
     }
 
     pub fn progress(&self) -> f64 {
@@ -152,20 +143,35 @@ impl Transition {
         }
     }
 
-    pub fn current_temperature(&self) -> u16 {
+    pub const fn current_temperature(&self) -> u16 {
         self.current_temperature
     }
 
-    pub fn target_temperature(&self) -> u16 {
+    pub const fn target_temperature(&self) -> u16 {
         self.target_temperature
     }
 
-    pub fn transition_start_temp(&self) -> u16 {
+    pub const fn transition_start_temp(&self) -> u16 {
         self.transition_start_temp
     }
 
-    pub fn transition_start_timestamp(&self) -> u64 {
+    pub const fn transition_start_timestamp(&self) -> u64 {
         self.transition_start_timestamp
+    }
+}
+
+pub fn apply_easing(t: f64, easing: &str) -> f64 {
+    match easing {
+        "ease_in" => t * t,
+        "ease_out" => t * (2.0 - t),
+        "ease_in_out" => {
+            if t < 0.5 {
+                2.0 * t * t
+            } else {
+                2.0f64.mul_add(-t, 4.0).mul_add(t, -1.0)
+            }
+        }
+        _ => t,
     }
 }
 

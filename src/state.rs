@@ -1,3 +1,4 @@
+use crate::transition;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -36,7 +37,7 @@ impl State {
     }
 }
 
-fn expand_path(path: &str) -> Option<PathBuf> {
+pub fn expand_path(path: &str) -> Option<PathBuf> {
     if path.starts_with('~') {
         dirs::home_dir().map(|home| home.join(&path[2..]))
     } else {
@@ -49,7 +50,8 @@ fn expand_path(path: &str) -> Option<PathBuf> {
     clippy::cast_possible_wrap,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::cast_lossless
+    clippy::cast_lossless,
+    reason = "temperature values are small enough that casts between u16/i16/f64 are safe"
 )]
 pub fn calculate_temperature_from_state(
     state: &State,
@@ -61,27 +63,12 @@ pub fn calculate_temperature_from_state(
     }
 
     let progress = state.elapsed_seconds as f64 / transition_duration_seconds as f64;
-    let eased_progress = apply_easing(progress, easing);
+    let eased_progress = transition::apply_easing(progress, easing);
 
     let temp_range = state.target_temp as i16 - state.transition_start_temp as i16;
     let temp_delta = (temp_range as f64 * eased_progress) as i16;
 
     (state.transition_start_temp as i16 + temp_delta) as u16
-}
-
-fn apply_easing(t: f64, easing: &str) -> f64 {
-    match easing {
-        "ease_in" => t * t,
-        "ease_out" => t * (2.0 - t),
-        "ease_in_out" => {
-            if t < 0.5 {
-                2.0 * t * t
-            } else {
-                -1.0 + (4.0 - 2.0 * t) * t
-            }
-        }
-        _ => t,
-    }
 }
 
 #[cfg(test)]

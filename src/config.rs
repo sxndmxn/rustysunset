@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
     #[default]
@@ -118,19 +118,13 @@ pub fn find_config() -> Option<PathBuf> {
 }
 
 pub fn load(path: Option<&str>) -> Config {
-    let mut config: Config = match path {
-        Some(p) => {
-            let content = std::fs::read_to_string(p).unwrap_or_default();
-            match toml::from_str(&content) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Error parsing config: {e}");
-                    Config::default()
-                }
-            }
-        }
-        None => Config::default(),
-    };
+    let mut config: Config = path.map_or_else(Config::default, |p| {
+        let content = std::fs::read_to_string(p).unwrap_or_default();
+        toml::from_str(&content).unwrap_or_else(|e| {
+            log::warn!("Error parsing config: {e}");
+            Config::default()
+        })
+    });
 
     // Apply defaults for any missing or empty daemon fields
     if config.daemon.tick_interval_seconds == 0 {

@@ -13,7 +13,7 @@ pub fn set_temperature(kelvin: u16) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn is_hyprsunset_running() -> bool {
+fn is_hyprsunset_running() -> bool {
     Command::new("pidof")
         .arg("hyprsunset")
         .output()

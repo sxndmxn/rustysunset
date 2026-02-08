@@ -1,3 +1,7 @@
+#![allow(clippy::print_stdout, reason = "CLI binary produces user-facing output")]
+#![allow(clippy::print_stderr, reason = "CLI binary reports errors to stderr")]
+#![allow(clippy::exit, reason = "CLI binary uses process::exit for error codes")]
+
 use clap::{Parser, Subcommand};
 use std::fs;
 use std::process;
@@ -17,7 +21,7 @@ mod transition;
 #[command(author = "rustysunset developers")]
 #[command(version = "0.1.0")]
 #[command(about = "Smooth color temperature transitions for hyprsunset", long_about = None)]
-#[allow(clippy::struct_excessive_bools)]
+#[allow(clippy::struct_excessive_bools, reason = "CLI flags are inherently boolean")]
 struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -127,12 +131,10 @@ fn main() {
                     eprintln!("Failed to set temperature: {e}");
                     process::exit(1);
                 }
-                // Clear state file - this is an immediate override, not a transition
-                let state_file = expand_path(&config.daemon.state_file);
+                let state_file = state::expand_path(&config.daemon.state_file);
                 if let Some(ref p) = state_file {
                     let _ = fs::remove_file(p);
                 }
-                // Also update status file
                 let status = format!(
                     "temp={temperature}\nphase=manual\ntarget={temperature}\nprogress=1.00\n",
                 );
@@ -140,7 +142,6 @@ fn main() {
             }
         }
         Some(Commands::Pause) => {
-            // Write pause command to control file
             let control_file = control_file_from_status(&config.daemon.status_file);
             let _ = fs::write(&control_file, "pause\n");
             if !args.quiet {
@@ -148,7 +149,6 @@ fn main() {
             }
         }
         Some(Commands::Resume) => {
-            // Write resume command to control file
             let control_file = control_file_from_status(&config.daemon.status_file);
             let _ = fs::write(&control_file, "resume\n");
             if !args.quiet {
@@ -157,19 +157,23 @@ fn main() {
         }
         Some(Commands::Config) => {
             if args.json {
-                println!("{}", serde_json::to_string(&config).unwrap());
+                match serde_json::to_string(&config) {
+                    Ok(json) => println!("{json}"),
+                    Err(e) => {
+                        eprintln!("Failed to serialize config: {e}");
+                        process::exit(1);
+                    }
+                }
             } else {
-                println!("{}", toml::to_string_pretty(&config).unwrap());
+                match toml::to_string_pretty(&config) {
+                    Ok(toml) => println!("{toml}"),
+                    Err(e) => {
+                        eprintln!("Failed to serialize config: {e}");
+                        process::exit(1);
+                    }
+                }
             }
         }
-    }
-}
-
-fn expand_path(path: &str) -> Option<std::path::PathBuf> {
-    if path.starts_with('~') {
-        dirs::home_dir().map(|home| home.join(&path[2..]))
-    } else {
-        Some(std::path::PathBuf::from(path))
     }
 }
 
@@ -177,7 +181,7 @@ fn control_file_from_status(status_file: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(status_file).with_extension("control")
 }
 
-fn should_set_temperature(optimize_updates: bool, last_sent: Option<u16>, current: u16) -> bool {
+const fn should_set_temperature(optimize_updates: bool, last_sent: Option<u16>, current: u16) -> bool {
     if !optimize_updates {
         return true;
     }
@@ -188,7 +192,7 @@ fn should_set_temperature(optimize_updates: bool, last_sent: Option<u16>, curren
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, reason = "daemon loop is inherently sequential")]
 fn run_daemon(
     config: &config::Config,
     dry_run: bool,
@@ -208,12 +212,10 @@ fn run_daemon(
     let shutdown_clone = shutdown.clone();
     let paused = Arc::new(AtomicBool::new(false));
 
-    // Set up signal handler for graceful shutdown
     let result = ctrlc::set_handler(move || {
         shutdown_clone.store(true, Ordering::SeqCst);
     });
 
-    // Check for control file commands
     let control_file = control_file_from_status(&config.daemon.status_file);
     let status_file = std::path::PathBuf::from(&config.daemon.status_file);
     let state_file = config.daemon.state_file.clone();
@@ -221,15 +223,12 @@ fn run_daemon(
     let scheduler = scheduler::Schedule::new(config.clone())
         .map_err(|e| format!("Invalid schedule configuration: {e}"))?;
 
-    // Try to load state or calculate appropriate temperature
     let initial_temp = if config.mode == config::Mode::Auto || config.mode == config::Mode::Fixed {
         let target_temp = scheduler.target_temperature();
 
-        // Check for saved state
-        if let Some(saved_state) = state::State::load(&state_file) {
+        state::State::load(&state_file).map_or(target_temp, |saved_state| {
             let max_age = u64::from(config.transition.duration_minutes) * 60 * 2;
             if saved_state.age_seconds() < max_age {
-                // Resume from saved state
                 log::info!("Resuming transition from saved state");
                 state::calculate_temperature_from_state(
                     &saved_state,
@@ -237,14 +236,10 @@ fn run_daemon(
                     &config.transition.easing,
                 )
             } else {
-                // State too old, use calculated target
                 log::info!("Saved state too old, calculating fresh");
                 target_temp
             }
-        } else {
-            // No state, use calculated target
-            target_temp
-        }
+        })
     } else {
         config.temperature.day
     };
@@ -253,7 +248,6 @@ fn run_daemon(
 
     let tick_interval = Duration::from_secs(config.daemon.tick_interval_seconds);
 
-    // For tracking when to update status file
     let mut tick_count = 0;
     let status_update_interval = if config.daemon.status_update_interval == 0 {
         1
@@ -264,7 +258,6 @@ fn run_daemon(
     let mut last_set_temperature: Option<u16> = None;
 
     loop {
-        // Check control file for commands
         if let Ok(content) = fs::read_to_string(&control_file) {
             for line in content.lines() {
                 match line.trim() {
@@ -277,12 +270,10 @@ fn run_daemon(
                     _ => {}
                 }
             }
-            // Clear control file after reading
             let _ = fs::write(&control_file, "");
         }
 
         if shutdown.load(Ordering::SeqCst) {
-            // Save state before exiting
             if !dry_run {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -337,14 +328,13 @@ fn run_daemon(
         if !dry_run {
             if should_set_temperature(config.daemon.optimize_updates, last_set_temperature, temp) {
                 if let Err(e) = hyprctl::set_temperature(temp) {
-                    eprintln!("Error setting temperature: {e}");
+                    log::error!("Error setting temperature: {e}");
                 } else {
                     last_set_temperature = Some(temp);
                     log::info!("Set temperature to {temp}");
                 }
             }
 
-            // Only update status file at configured interval
             tick_count += 1;
             if tick_count >= status_update_interval {
                 tick_count = 0;
@@ -360,7 +350,7 @@ fn run_daemon(
     }
 
     if let Err(e) = result {
-        eprintln!("Error setting signal handler: {e}");
+        log::error!("Error setting signal handler: {e}");
     }
 
     Ok(())

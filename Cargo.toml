@@ -5,7 +5,9 @@ edition = "2021"
 description = "Smooth color temperature transitions for hyprsunset"
 authors = ["rustysunset developers"]
 license = "MIT"
-repository = "https://github.com/rustysunset/rustysunset"
+repository = "https://github.com/sxndmxn/rustysunset"
+keywords = ["hyprland", "color-temperature", "wayland", "hyprsunset"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 sunrise = "1.2"
@@ -18,3 +20,29 @@ env_logger = "0.10"
 log = "0.4"
 dirs = "5.0"
 ctrlc = "3.4"
+
+[lints.rust]
+dead_code = "deny"
+unused_imports = "deny"
+unused_variables = "deny"
+unused_mut = "deny"
+unreachable_patterns = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+multiple_crate_versions = { level = "allow", priority = 1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+exit = "deny"
+mem_forget = "deny"
+wildcard_enum_match_arm = "deny"
+allow_attributes_without_reason = "deny"
