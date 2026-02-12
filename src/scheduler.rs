@@ -67,24 +67,18 @@ impl Schedule {
 
     fn auto_phase(&self, now: DateTime<Local>) -> Phase {
         let (sunrise, sunset) = sunrise_sunset_local(&self.coordinates, now);
+        let duration = Duration::minutes(i64::from(self.config.transition.duration_minutes));
 
-        let transition_duration = Duration::minutes(i64::from(self.config.transition.duration_minutes));
-        let next_sunrise = sunrise + Duration::days(1);
-
-        if now >= sunset && now < next_sunrise - transition_duration {
+        if now >= sunset + duration {
             Phase::Night
-        } else if (now >= next_sunrise - transition_duration && now < next_sunrise)
-            || (now >= sunrise - transition_duration && now < sunrise)
-        {
-            Phase::TransitioningToDay
-        } else if now >= sunrise && now < sunset - transition_duration {
-            Phase::Day
-        } else if now >= sunset - transition_duration && now < sunset {
+        } else if now >= sunset {
             Phase::TransitioningToNight
-        } else if now < sunrise - transition_duration {
-            Phase::Night
-        } else {
+        } else if now >= sunrise + duration {
+            Phase::Day
+        } else if now >= sunrise {
             Phase::TransitioningToDay
+        } else {
+            Phase::Night
         }
     }
 
@@ -133,25 +127,77 @@ impl Schedule {
     ) -> Option<TransitionWindow> {
         let (sunrise, sunset) = sunrise_sunset_local(&self.coordinates, now);
 
-        let to_night_start = sunset - duration;
-        if now >= to_night_start && now < sunset {
+        if now >= sunset && now < sunset + duration {
             return Some(TransitionWindow {
-                start: to_night_start,
+                start: sunset,
                 start_temp: self.config.temperature.day,
                 target_temp: self.config.temperature.night,
             });
         }
 
-        let to_day_start = sunrise - duration;
-        if now >= to_day_start && now < sunrise {
+        if now >= sunrise && now < sunrise + duration {
             return Some(TransitionWindow {
-                start: to_day_start,
+                start: sunrise,
                 start_temp: self.config.temperature.night,
                 target_temp: self.config.temperature.day,
             });
         }
 
         None
+    }
+
+    pub fn next_transition_start(&self, now: DateTime<Local>) -> Option<DateTime<Local>> {
+        match self.config.mode {
+            Mode::Auto => self.auto_next_transition_start(now),
+            Mode::Fixed => self.fixed_next_transition_start(now),
+        }
+    }
+
+    fn auto_next_transition_start(&self, now: DateTime<Local>) -> Option<DateTime<Local>> {
+        let (sunrise, sunset) = sunrise_sunset_local(&self.coordinates, now);
+        let duration = Duration::minutes(i64::from(self.config.transition.duration_minutes));
+
+        let phase = self.auto_phase(now);
+        match phase {
+            Phase::Day => Some(sunset),
+            Phase::Night if now >= sunset + duration => {
+                // Night after sunset — next transition is tomorrow's sunrise
+                let tomorrow = now.date_naive().succ_opt()?;
+                let tomorrow_noon = local_datetime(tomorrow, NaiveTime::from_hms_opt(12, 0, 0)?)?;
+                let (tomorrow_sunrise, _) =
+                    sunrise_sunset_local(&self.coordinates, tomorrow_noon);
+                Some(tomorrow_sunrise)
+            }
+            Phase::Night => {
+                // Night before sunrise — next transition is today's sunrise
+                Some(sunrise)
+            }
+            Phase::TransitioningToNight | Phase::TransitioningToDay => None,
+        }
+    }
+
+    fn fixed_next_transition_start(&self, now: DateTime<Local>) -> Option<DateTime<Local>> {
+        let date = now.date_naive();
+        let duration = Duration::minutes(i64::from(self.config.transition.duration_minutes));
+
+        let phase = self.fixed_phase(now);
+        match phase {
+            Phase::Day => {
+                // Next transition is bedtime - duration (start of TransitioningToNight)
+                let bedtime_dt = local_datetime(date, self.bedtime_time)?;
+                Some(bedtime_dt - duration)
+            }
+            Phase::Night if now.time() >= self.bedtime_time => {
+                // Night after bedtime — next transition is tomorrow's wakeup
+                let tomorrow = date.succ_opt()?;
+                local_datetime(tomorrow, self.wakeup_time)
+            }
+            Phase::Night => {
+                // Night before wakeup — next transition is today's wakeup
+                local_datetime(date, self.wakeup_time)
+            }
+            Phase::TransitioningToNight | Phase::TransitioningToDay => None,
+        }
     }
 
     fn fixed_transition_window(
@@ -216,10 +262,21 @@ mod tests {
     use super::*;
     use chrono::{Duration, Local, TimeZone, Timelike};
 
+    /// Config with coordinates aligned to the local timezone so solar events
+    /// fall on the expected local date regardless of where tests run.
+    fn auto_test_config() -> Config {
+        let mut config = Config::default();
+        let offset_secs = Local::now().offset().local_minus_utc();
+        let longitude = (f64::from(offset_secs) / 3600.0 * 15.0).clamp(-180.0, 180.0);
+        config.location.latitude = 48.0;
+        config.location.longitude = longitude;
+        config
+    }
+
     #[test]
     fn auto_phase_after_sunset_is_night() {
-        let config = Config::default();
-        let schedule = Schedule::new(config.clone()).expect("valid config");
+        let config = auto_test_config();
+        let schedule = Schedule::new(config).expect("valid config");
 
         let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
         let (_, sunset) = sunrise_sunset_local(&schedule.coordinates, base);
@@ -229,27 +286,26 @@ mod tests {
     }
 
     #[test]
-    fn auto_phase_before_next_sunrise_is_transitioning_to_day() {
-        let mut config = Config::default();
+    fn auto_phase_after_sunrise_is_transitioning_to_day() {
+        let mut config = auto_test_config();
         config.transition.duration_minutes = 60;
         let schedule = Schedule::new(config.clone()).expect("valid config");
 
         let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
         let (sunrise, _) = sunrise_sunset_local(&schedule.coordinates, base);
-        let next_sunrise = sunrise + Duration::days(1);
-        let half_transition = Duration::minutes((config.transition.duration_minutes / 2) as i64);
-        let before_next_sunrise = next_sunrise - half_transition;
+        let half_transition = Duration::minutes(i64::from(config.transition.duration_minutes / 2));
+        let during_transition = sunrise + half_transition;
 
         assert_eq!(
-            schedule.current_phase_at(before_next_sunrise),
+            schedule.current_phase_at(during_transition),
             Phase::TransitioningToDay
         );
     }
 
     #[test]
     fn auto_phase_midday_is_day() {
-        let config = Config::default();
-        let schedule = Schedule::new(config.clone()).expect("valid config");
+        let config = auto_test_config();
+        let schedule = Schedule::new(config).expect("valid config");
 
         let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
         let (sunrise, sunset) = sunrise_sunset_local(&schedule.coordinates, base);
@@ -269,36 +325,37 @@ mod tests {
     }
 
     #[test]
-    fn auto_phase_at_transition_start_to_night() {
-        let mut config = Config::default();
+    fn auto_phase_at_sunset_is_transitioning_to_night() {
+        let mut config = auto_test_config();
         config.transition.duration_minutes = 60;
-        let schedule = Schedule::new(config.clone()).expect("valid config");
+        let schedule = Schedule::new(config).expect("valid config");
 
         let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
         let (_, sunset) = sunrise_sunset_local(&schedule.coordinates, base);
-        let start = sunset - Duration::minutes(config.transition.duration_minutes as i64);
 
         assert_eq!(
-            schedule.current_phase_at(start),
+            schedule.current_phase_at(sunset),
             Phase::TransitioningToNight
         );
     }
 
     #[test]
-    fn auto_phase_at_sunset_is_night() {
-        let config = Config::default();
+    fn auto_phase_at_transition_end_is_night() {
+        let mut config = auto_test_config();
+        config.transition.duration_minutes = 60;
         let schedule = Schedule::new(config.clone()).expect("valid config");
 
         let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
         let (_, sunset) = sunrise_sunset_local(&schedule.coordinates, base);
+        let end = sunset + Duration::minutes(i64::from(config.transition.duration_minutes));
 
-        assert_eq!(schedule.current_phase_at(sunset), Phase::Night);
+        assert_eq!(schedule.current_phase_at(end), Phase::Night);
     }
 
     #[test]
     fn auto_phase_at_sunrise_is_transitioning_to_day() {
-        let config = Config::default();
-        let schedule = Schedule::new(config.clone()).expect("valid config");
+        let config = auto_test_config();
+        let schedule = Schedule::new(config).expect("valid config");
 
         let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
         let (sunrise, _) = sunrise_sunset_local(&schedule.coordinates, base);
@@ -332,5 +389,128 @@ mod tests {
             Phase::TransitioningToNight
         );
         assert_eq!(schedule.current_phase_at(bedtime), Phase::Night);
+    }
+
+    // --- next_transition_start tests (auto mode) ---
+
+    #[test]
+    fn next_transition_during_day_is_sunset() {
+        let config = auto_test_config();
+        let schedule = Schedule::new(config).expect("valid config");
+
+        let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
+        let (_, sunset) = sunrise_sunset_local(&schedule.coordinates, base);
+
+        let result = schedule.next_transition_start(base);
+        assert_eq!(result, Some(sunset));
+    }
+
+    #[test]
+    fn next_transition_during_night_after_sunset_is_tomorrow_sunrise() {
+        let mut config = auto_test_config();
+        config.transition.duration_minutes = 30;
+        let schedule = Schedule::new(config).expect("valid config");
+
+        let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
+        let (_, sunset) = sunrise_sunset_local(&schedule.coordinates, base);
+        let night = sunset + Duration::hours(2);
+
+        let tomorrow_noon = Local.with_ymd_and_hms(2024, 6, 2, 12, 0, 0).unwrap();
+        let (tomorrow_sunrise, _) = sunrise_sunset_local(&schedule.coordinates, tomorrow_noon);
+
+        let result = schedule.next_transition_start(night);
+        assert_eq!(result, Some(tomorrow_sunrise));
+    }
+
+    #[test]
+    fn next_transition_during_night_before_sunrise_is_today_sunrise() {
+        let config = auto_test_config();
+        let schedule = Schedule::new(config).expect("valid config");
+
+        let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
+        let (sunrise, _) = sunrise_sunset_local(&schedule.coordinates, base);
+        let early_morning = base.with_hour(2).unwrap().with_minute(0).unwrap();
+
+        assert_eq!(schedule.current_phase_at(early_morning), Phase::Night);
+
+        let result = schedule.next_transition_start(early_morning);
+        assert_eq!(result, Some(sunrise));
+    }
+
+    #[test]
+    fn next_transition_during_transition_is_none() {
+        let mut config = auto_test_config();
+        config.transition.duration_minutes = 60;
+        let schedule = Schedule::new(config).expect("valid config");
+
+        let base = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
+        let (_, sunset) = sunrise_sunset_local(&schedule.coordinates, base);
+        let during = sunset + Duration::minutes(15);
+
+        assert_eq!(
+            schedule.current_phase_at(during),
+            Phase::TransitioningToNight
+        );
+        assert_eq!(schedule.next_transition_start(during), None);
+    }
+
+    // --- next_transition_start tests (fixed mode) ---
+
+    fn fixed_test_config() -> Config {
+        let mut config = Config::default();
+        config.mode = Mode::Fixed;
+        config.schedule.wakeup = "07:00".to_string();
+        config.schedule.bedtime = "22:00".to_string();
+        config.transition.duration_minutes = 60;
+        config
+    }
+
+    #[test]
+    fn fixed_next_transition_during_day() {
+        let config = fixed_test_config();
+        let schedule = Schedule::new(config).expect("valid config");
+
+        let day = Local.with_ymd_and_hms(2024, 6, 1, 12, 0, 0).unwrap();
+        assert_eq!(schedule.current_phase_at(day), Phase::Day);
+
+        let expected = day.with_hour(21).unwrap().with_minute(0).unwrap();
+        assert_eq!(schedule.next_transition_start(day), Some(expected));
+    }
+
+    #[test]
+    fn fixed_next_transition_night_before_wakeup() {
+        let config = fixed_test_config();
+        let schedule = Schedule::new(config).expect("valid config");
+
+        let early = Local.with_ymd_and_hms(2024, 6, 1, 3, 0, 0).unwrap();
+        assert_eq!(schedule.current_phase_at(early), Phase::Night);
+
+        let expected = early.with_hour(7).unwrap().with_minute(0).unwrap();
+        assert_eq!(schedule.next_transition_start(early), Some(expected));
+    }
+
+    #[test]
+    fn fixed_next_transition_night_after_bedtime() {
+        let config = fixed_test_config();
+        let schedule = Schedule::new(config).expect("valid config");
+
+        let late = Local.with_ymd_and_hms(2024, 6, 1, 23, 0, 0).unwrap();
+        assert_eq!(schedule.current_phase_at(late), Phase::Night);
+
+        let expected = Local.with_ymd_and_hms(2024, 6, 2, 7, 0, 0).unwrap();
+        assert_eq!(schedule.next_transition_start(late), Some(expected));
+    }
+
+    #[test]
+    fn fixed_next_transition_during_transition_is_none() {
+        let config = fixed_test_config();
+        let schedule = Schedule::new(config).expect("valid config");
+
+        let wakeup = Local.with_ymd_and_hms(2024, 6, 1, 7, 30, 0).unwrap();
+        assert_eq!(
+            schedule.current_phase_at(wakeup),
+            Phase::TransitioningToDay
+        );
+        assert_eq!(schedule.next_transition_start(wakeup), None);
     }
 }

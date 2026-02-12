@@ -346,7 +346,27 @@ fn run_daemon(
             }
         }
 
-        thread::sleep(tick_interval);
+        let sleep_duration = match phase {
+            scheduler::Phase::Day | scheduler::Phase::Night => scheduler
+                .next_transition_start(now)
+                .and_then(|next| (next - now).to_std().ok())
+                .map_or(tick_interval, |d| d.min(Duration::from_secs(3600))),
+            scheduler::Phase::TransitioningToNight | scheduler::Phase::TransitioningToDay => {
+                tick_interval
+            }
+        };
+
+        let deadline = std::time::Instant::now() + sleep_duration;
+        loop {
+            if shutdown.load(Ordering::SeqCst) {
+                break;
+            }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            thread::sleep(remaining.min(tick_interval));
+        }
     }
 
     if let Err(e) = result {
