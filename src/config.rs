@@ -88,10 +88,10 @@ impl Default for Daemon {
     fn default() -> Self {
         Self {
             tick_interval_seconds: 5,
-            status_file: "/tmp/rustysunset.status".to_string(),
+            status_file: "/tmp/candela.status".to_string(),
             optimize_updates: true,
             status_update_interval: 1,
-            state_file: "~/.cache/rustysunset/state.toml".to_string(),
+            state_file: "~/.cache/candela/state.toml".to_string(),
         }
     }
 }
@@ -109,9 +109,9 @@ pub struct Config {
 
 pub fn find_config() -> Option<PathBuf> {
     let config_locations = [
-        PathBuf::from("rustysunset.toml"),
-        dirs::config_dir()?.join("rustysunset/config.toml"),
-        dirs::config_dir()?.join("rustysunset.toml"),
+        PathBuf::from("candela.toml"),
+        dirs::config_dir()?.join("candela/config.toml"),
+        dirs::config_dir()?.join("candela.toml"),
     ];
 
     config_locations.into_iter().find(|path| path.exists())
@@ -131,10 +131,10 @@ pub fn load(path: Option<&str>) -> Config {
         config.daemon.tick_interval_seconds = 5;
     }
     if config.daemon.status_file.is_empty() {
-        config.daemon.status_file = "/tmp/rustysunset.status".to_string();
+        config.daemon.status_file = "/tmp/candela.status".to_string();
     }
     if config.daemon.state_file.is_empty() {
-        config.daemon.state_file = "~/.cache/rustysunset/state.toml".to_string();
+        config.daemon.state_file = "~/.cache/candela/state.toml".to_string();
     }
 
     apply_env(&mut config);
@@ -142,7 +142,7 @@ pub fn load(path: Option<&str>) -> Config {
 }
 
 fn apply_env(config: &mut Config) {
-    if let Ok(val) = std::env::var("RUSTYSUNSET_MODE") {
+    if let Ok(val) = std::env::var("CANDELA_MODE") {
         match val.to_lowercase().as_str() {
             "auto" => config.mode = Mode::Auto,
             "fixed" => config.mode = Mode::Fixed,
@@ -150,69 +150,69 @@ fn apply_env(config: &mut Config) {
         }
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_LATITUDE") {
+    if let Ok(val) = std::env::var("CANDELA_LATITUDE") {
         if let Ok(lat) = val.parse() {
             config.location.latitude = lat;
         }
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_LONGITUDE") {
+    if let Ok(val) = std::env::var("CANDELA_LONGITUDE") {
         if let Ok(lon) = val.parse() {
             config.location.longitude = lon;
         }
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_DAY_TEMP") {
+    if let Ok(val) = std::env::var("CANDELA_DAY_TEMP") {
         if let Ok(temp) = val.parse() {
             config.temperature.day = temp;
         }
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_NIGHT_TEMP") {
+    if let Ok(val) = std::env::var("CANDELA_NIGHT_TEMP") {
         if let Ok(temp) = val.parse() {
             config.temperature.night = temp;
         }
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_TRANSITION_DURATION") {
+    if let Ok(val) = std::env::var("CANDELA_TRANSITION_DURATION") {
         if let Ok(dur) = val.parse() {
             config.transition.duration_minutes = dur;
         }
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_EASING") {
+    if let Ok(val) = std::env::var("CANDELA_EASING") {
         config.transition.easing = val;
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_TICK_INTERVAL") {
+    if let Ok(val) = std::env::var("CANDELA_TICK_INTERVAL") {
         if let Ok(interval) = val.parse() {
             config.daemon.tick_interval_seconds = interval;
         }
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_STATUS_FILE") {
+    if let Ok(val) = std::env::var("CANDELA_STATUS_FILE") {
         config.daemon.status_file = val;
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_WAKEUP") {
+    if let Ok(val) = std::env::var("CANDELA_WAKEUP") {
         config.schedule.wakeup = val;
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_BEDTIME") {
+    if let Ok(val) = std::env::var("CANDELA_BEDTIME") {
         config.schedule.bedtime = val;
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_OPTIMIZE_UPDATES") {
+    if let Ok(val) = std::env::var("CANDELA_OPTIMIZE_UPDATES") {
         config.daemon.optimize_updates = val.to_lowercase() != "false";
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_STATUS_UPDATE_INTERVAL") {
+    if let Ok(val) = std::env::var("CANDELA_STATUS_UPDATE_INTERVAL") {
         if let Ok(interval) = val.parse() {
             config.daemon.status_update_interval = interval;
         }
     }
 
-    if let Ok(val) = std::env::var("RUSTYSUNSET_STATE_FILE") {
+    if let Ok(val) = std::env::var("CANDELA_STATE_FILE") {
         config.daemon.state_file = val;
     }
 }

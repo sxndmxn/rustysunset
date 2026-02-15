@@ -1,11 +1,11 @@
 [package]
-name = "rustysunset"
-version = "0.1.0"
+name = "candela"
+version = "0.2.0"
 edition = "2021"
 description = "Smooth color temperature transitions for hyprsunset"
-authors = ["rustysunset developers"]
+authors = ["candela developers"]
 license = "MIT"
-repository = "https://github.com/sxndmxn/rustysunset"
+repository = "https://github.com/sxndmxn/candela"
 keywords = ["hyprland", "color-temperature", "wayland", "hyprsunset"]
 categories = ["command-line-utilities"]
 

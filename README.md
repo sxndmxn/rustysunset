@@ -1,4 +1,4 @@
-# rustysunset [WIP]
+# candela [WIP]
 
 Smooth color temperature transitions for hyprsunset.
 
@@ -17,8 +17,8 @@ Smooth color temperature transitions for hyprsunset.
 ### From Source
 
 ```bash
-git clone https://github.com/rustysunset/rustysunset
-cd rustysunset
+git clone https://github.com/candela/candela
+cd candela
 cargo build --release
 cargo install --path .
 ```
@@ -26,12 +26,12 @@ cargo install --path .
 ### From Crates.io
 
 ```bash
-cargo install rustysunset
+cargo install candela
 ```
 
 ## Configuration
 
-Create a config file at `~/.config/rustysunset/config.toml`:
+Create a config file at `~/.config/candela/config.toml`:
 
 ```toml
 mode = "auto"
@@ -80,33 +80,33 @@ status_update_interval = 1
 All config options can be overridden via environment variables:
 
 ```bash
-RUSTYSUNSET_MODE=auto
-RUSTYSUNSET_LATITUDE=48.516
-RUSTYSUNSET_LONGITUDE=9.12
-RUSTYSUNSET_DAY_TEMP=6500
-RUSTYSUNSET_NIGHT_TEMP=1500
-RUSTYSUNSET_TRANSITION_DURATION=60
-RUSTYSUNSET_EASING=linear
-RUSTYSUNSET_TICK_INTERVAL=5
-RUSTYSUNSET_OPTIMIZE_UPDATES=true
-RUSTYSUNSET_STATUS_UPDATE_INTERVAL=1
+CANDELA_MODE=auto
+CANDELA_LATITUDE=48.516
+CANDELA_LONGITUDE=9.12
+CANDELA_DAY_TEMP=6500
+CANDELA_NIGHT_TEMP=1500
+CANDELA_TRANSITION_DURATION=60
+CANDELA_EASING=linear
+CANDELA_TICK_INTERVAL=5
+CANDELA_OPTIMIZE_UPDATES=true
+CANDELA_STATUS_UPDATE_INTERVAL=1
 ```
 
 ## Usage
 
 ```bash
-rustysunset daemon    # Run the daemon (default)
-rustysunset now       # Show current temperature
-rustysunset status    # Show status (temp, phase, target, progress)
-rustysunset set 3000  # Set temperature immediately
-rustysunset pause     # Pause transition
-rustysunset resume    # Resume transition
-rustysunset config    # Print current config
+candela daemon    # Run the daemon (default)
+candela now       # Show current temperature
+candela status    # Show status (temp, phase, target, progress)
+candela set 3000  # Set temperature immediately
+candela pause     # Pause transition
+candela resume    # Resume transition
+candela config    # Print current config
 ```
 
 ### Status File
 
-The daemon writes status to `/tmp/rustysunset.status`:
+The daemon writes status to `/tmp/candela.status`:
 
 ```
 temp=5432
@@ -118,8 +118,8 @@ progress=0.75
 Use this for waybar integration:
 
 ```json
-"custom/rustysunset": {
-    "exec": "rustysunset status",
+"custom/candela": {
+    "exec": "candela status",
     "interval": 5,
     "format": "{}K"
 }
@@ -128,7 +128,7 @@ Use this for waybar integration:
 Or simply:
 
 ```bash
-watch -n 5 rustysunset status
+watch -n 5 candela status
 ```
 
 ## Hyprland Integration
@@ -136,18 +136,18 @@ watch -n 5 rustysunset status
 Add to your `~/.config/hypr/hyprland.conf`:
 
 ```hypr
-exec-once = rustysunset daemon
+exec-once = candela daemon
 ```
 
 Or as a systemd user service:
 
 ```ini
 [Unit]
-Description=rustysunset daemon
+Description=candela daemon
 After=graphical-session.target
 
 [Service]
-ExecStart=%h/.cargo/bin/rustysunset daemon
+ExecStart=%h/.cargo/bin/candela daemon
 Restart=on-failure
 
 [Install]
@@ -158,12 +158,12 @@ Then enable:
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now rustysunset
+systemctl --user enable --now candela
 ```
 
 ## Optimization
 
-rustysunset follows UNIX philosophy:
+candela follows UNIX philosophy:
 - **Optimized updates**: By default, hyprctl is only called when the temperature actually changes
 - **Configurable status updates**: Control how often the status file is updated (0 = every tick, N = every N ticks)
 - **Simple status file**: Easy to parse with shell tools, suitable for waybar modules

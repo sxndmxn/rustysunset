@@ -17,8 +17,8 @@ mod state;
 mod transition;
 
 #[derive(Parser, Debug)]
-#[command(name = "rustysunset")]
-#[command(author = "rustysunset developers")]
+#[command(name = "candela")]
+#[command(author = "candela developers")]
 #[command(version = "0.1.0")]
 #[command(about = "Smooth color temperature transitions for hyprsunset", long_about = None)]
 #[allow(clippy::struct_excessive_bools, reason = "CLI flags are inherently boolean")]
@@ -199,7 +199,7 @@ fn run_daemon(
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !quiet {
-        log::info!("Starting rustysunset daemon");
+        log::info!("Starting candela daemon");
     }
 
     hyprctl::ensure_hyprsunset_running()?;

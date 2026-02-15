@@ -1,4 +1,4 @@
-# rustysunset configuration
+# candela configuration
 # Smooth color temperature transitions for hyprsunset
 
 # Mode: "auto" (location-based sunrise/sunset) or "fixed" (fixed times)
@@ -40,4 +40,4 @@ optimize_updates = true
 # How often to update status file (0 = every tick, N = every N ticks)
 status_update_interval = 1
 # State file for transition persistence (follows XDG cache spec)
-state_file = "~/.cache/rustysunset/state.toml"
+state_file = "~/.cache/candela/state.toml"

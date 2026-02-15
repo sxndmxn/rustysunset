@@ -1,6 +1,6 @@
 target/
 Cargo.lock
 *.toml
-!rustysunset.toml
+!candela.toml
 !Cargo.toml
 .DS_Store
