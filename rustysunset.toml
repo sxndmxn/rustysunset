@@ -6,8 +6,8 @@ mode = "auto"
 
 [location]
 # Your geographic coordinates
-latitude = 48.516
-longitude = 9.12
+latitude = 37.77
+longitude = -122.42
 
 [schedule]
 wakeup = "07:00"
