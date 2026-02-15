@@ -53,7 +53,7 @@ impl Default for Transition {
     fn default() -> Self {
         Self {
             duration_minutes: 60,
-            easing: "linear".to_string(),
+            easing: "smooth".to_string(),
         }
     }
 }

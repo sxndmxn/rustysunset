@@ -16,8 +16,16 @@ bedtime = "22:00"
 [transition]
 # Transition duration in minutes
 duration_minutes = 60
-# Easing function: linear, ease_in, ease_out, ease_in_out
-easing = "linear"
+# Easing function for temperature transitions:
+#   linear    - constant rate, no smoothing
+#   ease_in   - starts slow, accelerates (quadratic)
+#   ease_out  - starts fast, decelerates (quadratic)
+#   ease_in_out - slow at both ends (quadratic)
+#   sine      - gentle S-curve using cosine, natural feel
+#   smooth    - Hermite smoothstep (3t^2 - 2t^3), best default
+#   smoother  - Perlin smootherstep (6t^5 - 15t^4 + 10t^3), ultra-smooth
+#   cubic_bezier(x1, y1, x2, y2) - custom curve, e.g. "cubic_bezier(0.25, 0.1, 0.25, 1.0)"
+easing = "smooth"
 
 [temperature]
 # Color temperature in Kelvin

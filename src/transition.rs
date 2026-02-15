@@ -162,6 +162,7 @@ impl Transition {
 
 pub fn apply_easing(t: f64, easing: &str) -> f64 {
     match easing {
+        "linear" => t,
         "ease_in" => t * t,
         "ease_out" => t * (2.0 - t),
         "ease_in_out" => {
@@ -171,8 +172,54 @@ pub fn apply_easing(t: f64, easing: &str) -> f64 {
                 2.0f64.mul_add(-t, 4.0).mul_add(t, -1.0)
             }
         }
-        _ => t,
+        "sine" => (1.0 - (t * std::f64::consts::PI).cos()) / 2.0,
+        "smooth" => t * t * 2.0f64.mul_add(-t, 3.0),
+        "smoother" => t * t * t * t.mul_add(6.0f64.mul_add(t, -15.0), 10.0),
+        _ => parse_cubic_bezier(easing)
+            .map_or(t, |[x1, y1, x2, y2]| eval_cubic_bezier(t, x1, y1, x2, y2)),
     }
+}
+
+fn parse_cubic_bezier(s: &str) -> Option<[f64; 4]> {
+    let inner = s.trim().strip_prefix("cubic_bezier(")?.strip_suffix(')')?;
+    let parts: Vec<&str> = inner.split(',').collect();
+    if parts.len() != 4 {
+        return None;
+    }
+    Some([
+        parts[0].trim().parse().ok()?,
+        parts[1].trim().parse().ok()?,
+        parts[2].trim().parse().ok()?,
+        parts[3].trim().parse().ok()?,
+    ])
+}
+
+#[allow(
+    clippy::similar_names,
+    reason = "ax/bx/cx/ay/by/cy are standard polynomial coefficient names for bezier curves"
+)]
+fn eval_cubic_bezier(x: f64, x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
+    let cx = 3.0 * x1;
+    let bx = 3.0f64.mul_add(x2 - x1, -cx);
+    let ax = 1.0 - cx - bx;
+
+    let cy = 3.0 * y1;
+    let by = 3.0f64.mul_add(y2 - y1, -cy);
+    let ay = 1.0 - cy - by;
+
+    // Newton's method: find t where x(t) = x
+    let mut t = x;
+    for _ in 0..8 {
+        let x_t = ax.mul_add(t, bx).mul_add(t, cx) * t;
+        let dx = (3.0 * ax).mul_add(t, 2.0 * bx).mul_add(t, cx);
+        if dx.abs() < 1e-12 {
+            break;
+        }
+        t -= (x_t - x) / dx;
+    }
+    t = t.clamp(0.0, 1.0);
+
+    ay.mul_add(t, by).mul_add(t, cy) * t
 }
 
 fn current_unix_timestamp() -> u64 {
@@ -221,6 +268,7 @@ mod tests {
     fn easing_linear_at_halfway() {
         let mut config = Config::default();
         config.transition.duration_minutes = 1;
+        config.transition.easing = "linear".to_string();
         let mut transition = Transition::new_with_temp(config, 6500);
 
         transition.update(1500);
@@ -284,10 +332,83 @@ mod tests {
     fn align_with_schedule_sets_expected_temperature() {
         let mut config = Config::default();
         config.transition.duration_minutes = 60;
+        config.transition.easing = "linear".to_string();
         let mut transition = Transition::new_with_temp(config, 6500);
 
         transition.align_with_schedule(6500, 1500, Duration::from_secs(1800));
 
         assert_eq!(transition.current_temperature(), 4000);
+    }
+
+    #[test]
+    fn easing_sine_boundaries() {
+        assert!(apply_easing(0.0, "sine").abs() < f64::EPSILON);
+        assert!((apply_easing(1.0, "sine") - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn easing_smooth_boundaries() {
+        assert!(apply_easing(0.0, "smooth").abs() < f64::EPSILON);
+        assert!((apply_easing(1.0, "smooth") - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn easing_smoother_boundaries() {
+        assert!(apply_easing(0.0, "smoother").abs() < f64::EPSILON);
+        assert!((apply_easing(1.0, "smoother") - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn easing_sine_at_midpoint() {
+        assert!((apply_easing(0.5, "sine") - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn easing_smooth_at_midpoint() {
+        assert!((apply_easing(0.5, "smooth") - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn easing_smoother_at_midpoint() {
+        assert!((apply_easing(0.5, "smoother") - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn easing_curves_differ_at_quarter() {
+        let sine = apply_easing(0.25, "sine");
+        let smooth = apply_easing(0.25, "smooth");
+        let smoother = apply_easing(0.25, "smoother");
+        let linear = apply_easing(0.25, "linear");
+
+        assert!((sine - smooth).abs() > 0.001);
+        assert!((sine - smoother).abs() > 0.001);
+        assert!((smooth - smoother).abs() > 0.001);
+        assert!((sine - linear).abs() > 0.001);
+    }
+
+    #[test]
+    fn cubic_bezier_linear_equivalent() {
+        let result = apply_easing(0.5, "cubic_bezier(0.0, 0.0, 1.0, 1.0)");
+        assert!((result - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn cubic_bezier_css_ease() {
+        let result = apply_easing(0.5, "cubic_bezier(0.25, 0.1, 0.25, 1.0)");
+        assert!(result > 0.0 && result < 1.0);
+    }
+
+    #[test]
+    fn cubic_bezier_invalid_fallback() {
+        assert!((apply_easing(0.5, "cubic_bezier(invalid)") - 0.5).abs() < f64::EPSILON);
+        assert!((apply_easing(0.5, "not_a_curve") - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cubic_bezier_endpoints() {
+        let result_0 = apply_easing(0.0, "cubic_bezier(0.25, 0.1, 0.25, 1.0)");
+        let result_1 = apply_easing(1.0, "cubic_bezier(0.25, 0.1, 0.25, 1.0)");
+        assert!(result_0.abs() < 0.01);
+        assert!((result_1 - 1.0).abs() < 0.01);
     }
 }
